@@ -864,7 +864,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
           const k=it.weightGrams/100;
           return {name:it.name||food.name,w:it.weightGrams,p:round1(food.p*k),c:round1(food.c*k),f:round1(food.f*k)};
         }
-        if(!it.name||it.p==null||it.c==null||it.f==null)throw new ToolError("没有foodId必须提供name、p、c、f");
+        if(!it.name||it.p==null||it.c==null||it.f==null)throw new ToolError("没有 foodId 的条目必须给 name、p、c、f");
         return {name:it.name,w:it.weightGrams,p:it.p,c:it.c,f:it.f};
       });
       const result=commitMeal({toolName:"log_meal_items",requestId:a.requestId,payload:a,date,slot:a.mealSlot,rows});
