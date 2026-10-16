@@ -1,8 +1,24 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, unlinkSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
-import { createEngine as oldEngine } from '../../portfolio_build/nutrition-tracker-mcp/engine.js';
+// Load the exact v5.0 engine from this repository's Git history.
+// Requires a full Git clone (or fetching the referenced historical commit).
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const legacySource = execFileSync('git', ['show', '187c4f7ef032c2dde7654be37569ad6ab7842eac:engine.js'], {
+  cwd:projectRoot, encoding:'utf8'
+});
+const oldPath = path.join(projectRoot,'audit',`.old-engine-${randomUUID()}.mjs`);
+let oldEngine;
+try {
+  writeFileSync(oldPath, legacySource);
+  ({createEngine:oldEngine}=await import(pathToFileURL(oldPath).href));
+} finally {
+  try { unlinkSync(oldPath); } catch {}
+}
 import { createEngine as newEngine } from '../engine.js';
 let state=20261017;
 function random(){state=(1664525*state+1013904223)>>>0;return state/2**32;}

@@ -196,6 +196,6 @@ The optional webhook accepts `weightKg` / `scaleWeightKg`, `hrvMs`, `hrvMetric`,
 
 ### Project status
 
-This repository is maintained as a **portfolio case study and experimental prototype**. It demonstrates end-to-end integration and design choices, not production hardening. The suite includes 32 engine and HTTP regression tests plus a reproducible synthetic-noise comparison (`node audit/compare-montecarlo.mjs`). These are not a substitute for longitudinal human validation, professional security review or clinical evidence.
+This repository is maintained as a **portfolio case study and experimental prototype**. It demonstrates end-to-end integration and design choices, not production hardening. The suite includes 32 engine and HTTP regression tests plus a synthetic-noise comparison (`node audit/compare-montecarlo.mjs`, requires the v5.0 historical commit in a full Git clone). These are not a substitute for longitudinal human validation, professional security review or clinical evidence.
 
 The source is publicly visible. **No open-source license has been selected yet**; visibility alone does not grant reuse rights.
