@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>今日 · Nutrition Tracker MCP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,400&family=Instrument+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500&family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper: #F4F0E8; --paper-2: #ECE6DA; --ink: #1C1B19; --ink-2: #57524A; --rule: #CFC7B8;
+      --accent: #B53A27; --lv-high: #86570F; --lv-med: #625D54; --lv-low: #4C6644;
+      --serif: "Noto Serif SC", "Songti SC", serif;
+      --display: "Fraunces", "Noto Serif SC", serif;
+      --sans: "Instrument Sans", "Noto Sans SC", "PingFang SC", sans-serif;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --paper: #1A1916; --paper-2: #23211D; --ink: #ECE6DA; --ink-2: #B3AC9F; --rule: #3A3731;
+        --accent: #E0674F; --lv-high: #D4A04E; --lv-med: #A39C90; --lv-low: #8FB083;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --paper: #1A1916; --paper-2: #23211D; --ink: #ECE6DA; --ink-2: #B3AC9F; --rule: #3A3731;
+      --accent: #E0674F; --lv-high: #D4A04E; --lv-med: #A39C90; --lv-low: #8FB083;
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; background: var(--paper); color: var(--ink);
+      font: 400 14px/1.6 var(--sans); font-variant-numeric: tabular-nums;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 0 40px; }
+    @media (max-width: 720px) { .wrap { padding: 0 16px; } }
+    .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: 40px; }
+    .c7 { grid-column: span 7; } .c5 { grid-column: span 5; } .c12 { grid-column: span 12; }
+    @media (max-width: 960px) { .grid { display: block; } .grid > .c5, .grid > .c7 + .c7 { margin-top: 40px; } .grid > .c5:first-child { margin-top: 0; } }
+    .scroll-x table { min-width: 560px; }
+    .scroll-x td, .scroll-x th { white-space: nowrap; }
+
+    .muted { color: var(--ink-2); }
+    .small { font-size: 12px; }
+    .num { font-family: var(--display); font-variant-numeric: lining-nums tabular-nums; }
+    button, input, select { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* 刊头 */
+    .masthead { padding: 32px 0 16px; border-bottom: 2px solid var(--ink); }
+    .masthead-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+    .dateline { font: 600 34px/1.1 var(--serif); letter-spacing: 0.01em; }
+    .dateline em { font: italic 400 22px var(--display); color: var(--ink-2); margin-left: 12px; letter-spacing: 0; }
+    .level-word { font: 700 34px/1.1 var(--serif); }
+    .level-word small { font: 500 14px var(--sans); color: var(--ink-2); margin-left: 8px; }
+    .meta { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--ink-2); }
+    .meta b { color: var(--ink); font-weight: 600; }
+    .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--lv-low); margin-right: 6px; vertical-align: 1px; }
+    .dot.off { background: var(--accent); }
+    .ticker { padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 12px; color: var(--ink-2); display: flex; gap: 16px; min-width: 0; }
+    .ticker span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+    .notice { margin-top: 16px; padding: 8px 12px; border-left: 2px solid var(--accent); font-size: 12px; }
+    .hidden { display: none !important; }
+
+    /* 分区 */
+    section { padding: 40px 0 8px; }
+    .sec-head { border-top: 1px solid var(--ink); padding-top: 12px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+    .sec-head h2 { margin: 0; font: 600 22px/1.3 var(--serif); }
+    .sec-head h2 i { font: italic 400 22px var(--display); color: var(--ink-2); margin-right: 10px; }
+    .sec-head .aside { font-size: 12px; color: var(--ink-2); }
+
+    /* 主数字 */
+    .hero-num { font: 300 112px/0.95 var(--display); letter-spacing: -0.03em; font-variation-settings: "opsz" 144; }
+    .hero-num.over { color: var(--accent); }
+    .hero-cap { margin: 12px 0 32px; font-size: 16px; color: var(--ink-2); }
+    .hero-cap b { color: var(--ink); font-weight: 600; }
+    @media (max-width: 720px) { .hero-num { font-size: 72px; } }
+
+    .macro { display: grid; grid-template-columns: 72px 1fr auto; align-items: baseline; column-gap: 16px; padding: 14px 0 0; }
+    .macro .name { font-family: var(--serif); font-weight: 500; }
+    .macro .val { font: 500 22px var(--display); }
+    .macro .val small { font: 400 14px var(--sans); color: var(--ink-2); }
+    .macro .rem { grid-column: 3; font-size: 12px; color: var(--ink-2); text-align: right; }
+    .bar { grid-column: 1 / -1; height: 2px; background: var(--rule); margin-top: 10px; position: relative; }
+    .bar i { position: absolute; inset: 0 auto 0 0; background: var(--ink); transition: width .5s cubic-bezier(.22,1,.36,1); }
+    .bar.over i { background: var(--accent); }
+
+    /* 身体状态 */
+    .ready { display: flex; align-items: baseline; gap: 16px; }
+    .ready .num { font-size: 72px; font-weight: 300; line-height: 1; }
+    .ready .state { font: 700 16px var(--serif); }
+    .state.ok { color: var(--lv-low); } .state.caution { color: var(--lv-high); } .state.alert { color: var(--accent); }
+    .kv { display: grid; grid-template-columns: repeat(3, 1fr); margin: 24px 0; border-top: 1px solid var(--rule); }
+    .kv div { padding: 12px 0; border-bottom: 1px solid var(--rule); }
+    .kv dt { font-size: 12px; color: var(--ink-2); }
+    .kv dd { margin: 0; font: 500 22px var(--display); }
+    .kv dd small { font: 400 12px var(--sans); color: var(--ink-2); margin-left: 4px; }
+    .advice { font: 400 16px/1.75 var(--serif); margin: 0 0 8px; }
+    .focus { font-size: 12px; color: var(--ink-2); margin-bottom: 24px; }
+
+    .seg { display: inline-flex; border: 1px solid var(--ink); border-radius: 2px; overflow: hidden; }
+    .seg button { border: 0; background: transparent; padding: 8px 18px; cursor: pointer; min-height: 36px; }
+    .seg button + button { border-left: 1px solid var(--ink); }
+    .seg button:hover { background: var(--paper-2); }
+    .seg button.on { background: var(--ink); color: var(--paper); }
+
+    /* 表格 */
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-weight: 500; font-size: 12px; color: var(--ink-2); padding: 8px 8px 8px 0; border-bottom: 1px solid var(--ink); }
+    td { padding: 10px 8px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: baseline; }
+    th.r, td.r { text-align: right; }
+    tr.today td { background: linear-gradient(var(--paper-2), var(--paper-2)); }
+    .scroll-x { overflow-x: auto; }
+    .tag { font-family: var(--serif); font-weight: 500; }
+    .lv-high { color: var(--lv-high); } .lv-medium { color: var(--lv-med); } .lv-low { color: var(--lv-low); }
+    .alert { color: var(--accent); }
+    .linkbtn { border: 0; background: none; color: var(--ink-2); cursor: pointer; padding: 6px 0; min-height: 32px; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule); }
+    .linkbtn:hover { color: var(--accent); text-decoration-color: currentColor; }
+
+    /* 表单 */
+    .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); }
+    .field input, .field select { background: var(--paper-2); border: 1px solid var(--rule); border-radius: 2px; padding: 8px 10px; font-size: 14px; color: var(--ink); min-height: 38px; width: 100%; }
+    .field input:focus, .field select:focus { border-color: var(--ink); outline: none; }
+    .btn { border: 1px solid var(--ink); background: var(--ink); color: var(--paper); border-radius: 2px; padding: 8px 18px; min-height: 38px; cursor: pointer; font-weight: 500; }
+    .btn:hover { background: var(--accent); border-color: var(--accent); }
+    .btn.ghost { background: transparent; color: var(--ink); }
+    .btn.ghost:hover { background: var(--paper-2); color: var(--ink); border-color: var(--ink); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; background: var(--ink); border-color: var(--ink); }
+    .form-row { display: grid; gap: 12px; align-items: end; }
+    .meal-form { grid-template-columns: 1fr 2.4fr 1fr auto; margin-bottom: 8px; }
+    .food-form { grid-template-columns: 2fr 1fr 1fr 1fr auto; margin: 4px 0 16px; }
+    .checkin-form { grid-template-columns: repeat(5, minmax(0, 1fr)) auto; margin: 4px 0 16px; }
+    .profile-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .span2 { grid-column: span 2; }
+    @media (max-width: 720px) {
+      .meal-form, .food-form, .checkin-form, .profile-grid { grid-template-columns: 1fr 1fr; }
+      .meal-form .wide, .food-form .field:first-child { grid-column: 1 / -1; }
+      .dateline em { display: block; margin: 4px 0 0; font-size: 16px; }
+      .dateline, .level-word { font-size: 26px; }
+      .kv { grid-template-columns: repeat(2, 1fr); }
+      .journal div { grid-template-columns: 1fr; gap: 2px; }
+    }
+    details > summary { cursor: pointer; font-size: 12px; color: var(--ink-2); padding: 8px 0; list-style: none; }
+    details > summary::before { content: "+ "; }
+    details[open] > summary::before { content: "− "; }
+    details > summary:hover { color: var(--ink); }
+
+    /* 补剂 */
+    .supp { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 0; border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left; cursor: pointer; }
+    .supp:first-child { border-top: 1px solid var(--rule); }
+    .supp:hover .box { border-color: var(--ink); }
+    .box { width: 18px; height: 18px; border: 1.5px solid var(--ink-2); border-radius: 2px; flex: none; display: grid; place-items: center; }
+    .supp.done .box { background: var(--ink); border-color: var(--ink); }
+    .supp.done .box::after { content: ""; width: 5px; height: 9px; border: solid var(--paper); border-width: 0 2px 2px 0; transform: rotate(45deg) translate(-1px, -1px); }
+    .supp .s-name { flex: 1; min-width: 0; }
+    .supp .s-name b { font-weight: 500; }
+    .supp.done .s-name b { text-decoration: line-through; text-decoration-color: var(--ink-2); }
+    .supp.muted { cursor: default; opacity: .45; }
+
+    /* 周计划 */
+    .week { display: grid; grid-template-columns: repeat(7, 1fr); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+    .day { border: 0; background: none; text-align: left; padding: 12px 10px 14px; cursor: pointer; border-left: 1px solid var(--rule); position: relative; min-width: 0; }
+    .day:first-child { border-left: 0; padding-left: 0; }
+    .day:hover { background: var(--paper-2); }
+    .day .d { font-size: 12px; color: var(--ink-2); }
+    .day.is-today .d { color: var(--accent); font-weight: 600; }
+    .day.is-today::before { content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--accent); }
+    .day .lv { font: 700 18px var(--serif); margin: 2px 0; }
+    .day .f { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .day .k { font-size: 12px; color: var(--ink-2); }
+    @media (max-width: 720px) { .week { grid-template-columns: repeat(4, 1fr); } .day:nth-child(5) { border-left: 0; padding-left: 0; } .day:nth-child(n+5) { border-top: 1px solid var(--rule); } }
+    .chart { margin-top: 24px; }
+    .chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+    .legend { display: flex; gap: 24px; font-size: 12px; color: var(--ink-2); margin-top: 8px; flex-wrap: wrap; }
+    .legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--ink); vertical-align: 4px; margin-right: 6px; }
+    .legend i.dash { border-top-style: dashed; border-color: var(--ink-2); }
+
+    /* 校准 */
+    .figs { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--rule); margin-bottom: 24px; }
+    .figs div { padding: 12px 0; border-bottom: 1px solid var(--rule); }
+    .figs div:nth-child(odd) { padding-right: 16px; }
+    .figs dt { font-size: 12px; color: var(--ink-2); }
+    .figs dd { margin: 2px 0 0; font: 500 26px var(--display); }
+    .figs dd small { font: 400 12px var(--sans); color: var(--ink-2); display: block; }
+    .note { font: 400 15px/1.75 var(--serif); margin: 0 0 24px; }
+
+    /* 日志 */
+    .journal { max-height: 360px; overflow-y: auto; border-top: 1px solid var(--rule); }
+    .journal div { padding: 10px 0; border-bottom: 1px solid var(--rule); display: grid; grid-template-columns: 96px 1fr; gap: 12px; font-size: 12px; }
+    .journal time { color: var(--ink-2); }
+    .journal p { margin: 0; font-size: 14px; }
+    .journal small { color: var(--ink-2); }
+
+    .ratio { display: grid; grid-template-columns: 56px 1fr; align-items: center; gap: 12px; font-size: 14px; }
+    .ratio input[type=range] { accent-color: var(--ink); width: 100%; }
+    .presets { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
+
+    footer { margin-top: 64px; padding: 16px 0 48px; border-top: 2px solid var(--ink); font-size: 12px; color: var(--ink-2); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 16px; border-left: 3px solid var(--accent); font-size: 14px; max-width: calc(100vw - 32px); z-index: 10; }
+
+    /* 首屏错落渐入 */
+    .reveal { animation: rise .6s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--i, 0) * 60ms); }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+    @media (prefers-reduced-motion: reduce) { .reveal { animation: none; } .bar i { transition: none; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="masthead reveal" style="--i:0">
+      <div class="masthead-row">
+        <div class="dateline" id="dateline">—</div>
+        <div class="level-word" id="level-word">—</div>
+      </div>
+      <div class="meta">
+        <span><span class="dot off" id="conn-dot"></span><span id="conn-text">连接中</span></span>
+        <span>校准 TDEE <b id="m-tdee">—</b> <span id="m-tdee-diff"></span></span>
+        <span>今日消耗目标 <b id="m-target-tdee">—</b></span>
+        <span>体重 <b id="m-scale">—</b> · 趋势 <b id="m-ewma">—</b></span>
+        <span id="m-demo" class="hidden alert">演示数据</span>
+      </div>
+    </header>
+    <div class="ticker reveal" style="--i:1"><span id="evt-time">—</span><span id="evt-summary">等待数据</span></div>
+    <div id="offline" class="notice hidden">与服务端断开，正在重连。断开期间数据不会更新，操作也不会执行。</div>
+
+    <!-- 今日 -->
+    <section class="grid">
+      <div class="c7 reveal" style="--i:2">
+        <div class="sec-head"><h2><i>i.</i>今日配额</h2><span class="aside" id="quota-base"></span></div>
+        <div class="hero-num num" id="hero-num">—</div>
+        <div class="hero-cap" id="hero-cap"></div>
+        <div id="macros"></div>
+      </div>
+      <div class="c5 reveal" style="--i:3">
+        <div class="sec-head"><h2><i>ii.</i>身体状态</h2><span class="aside" id="sync-aside"></span></div>
+        <div class="ready"><span class="num" id="ready-num">—</span><span class="state" id="ready-state"></span></div>
+        <dl class="kv" id="kv"></dl>
+        <p class="advice" id="advice"></p>
+        <div class="focus" id="focus"></div>
+        <div class="seg" role="group" aria-label="切换今日档位">
+          <button data-level="high" onclick="setLevel('high')">高碳</button>
+          <button data-level="medium" onclick="setLevel('medium')">中碳</button>
+          <button data-level="low" onclick="setLevel('low')">低碳</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 膳食 + 补剂 -->
+    <section class="grid">
+      <div class="c7 reveal" style="--i:4">
+        <div class="sec-head"><h2><i>iii.</i>今日膳食</h2><span class="aside" id="meal-count"></span></div>
+        <form id="meal-form" class="form-row meal-form">
+          <label class="field">餐次<select name="slot" id="meal-slot"></select></label>
+          <label class="field wide">食材（每 100g）<select name="foodId" id="food-select"></select></label>
+          <label class="field">克重<input name="weight" type="number" value="100" min="1" step="any" inputmode="decimal"></label>
+          <button class="btn">记录</button>
+        </form>
+        <details>
+          <summary>食材库里没有？按每 100g 营养新增</summary>
+          <form id="food-form" class="form-row food-form">
+            <label class="field">名称<input name="name" required placeholder="全麦贝果"></label>
+            <label class="field">蛋白质<input name="p" type="number" step="0.1" min="0" required></label>
+            <label class="field">碳水<input name="c" type="number" step="0.1" min="0" required></label>
+            <label class="field">脂肪<input name="f" type="number" step="0.1" min="0" required></label>
+            <button class="btn ghost">存入</button>
+          </form>
+        </details>
+        <div class="scroll-x">
+          <table>
+            <thead><tr><th>餐次</th><th>内容</th><th class="r">克重</th><th class="r">蛋白</th><th class="r">碳水</th><th class="r">脂肪</th><th class="r">千卡</th><th></th></tr></thead>
+            <tbody id="meal-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="c5 reveal" style="--i:5">
+        <div class="sec-head"><h2><i>iv.</i>补剂</h2><span class="aside" id="supp-count"></span></div>
+        <div id="supp-list"></div>
+      </div>
+    </section>
+
+    <!-- 本周 -->
+    <section class="reveal" style="--i:6">
+      <div class="sec-head"><h2><i>v.</i>本周计划与体重预测</h2><span class="aside">点击某天切换周模板档位</span></div>
+      <div class="week" id="week"></div>
+      <div class="chart">
+        <div id="chart"></div>
+        <div class="legend">
+          <span><i class="dash"></i>预测秤重（含糖原水）</span>
+          <span><i></i>预测组织净重</span>
+          <span id="chart-end"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 校准 + 账本 -->
+    <section class="grid">
+      <div class="c5 reveal" style="--i:7">
+        <div class="sec-head"><h2><i>vi.</i>代谢校准</h2><span class="aside">阻尼 0.35 · 单步 ±120</span></div>
+        <dl class="figs" id="figs"></dl>
+        <p class="note" id="cal-note"></p>
+        <button class="btn" id="cal-btn" onclick="calibrate()">执行校准并写入账本</button>
+        <div id="cal-history" style="margin-top:24px"></div>
+      </div>
+      <div class="c7 reveal" style="--i:8">
+        <div class="sec-head"><h2><i>vii.</i>近两周账本</h2><span class="aside">秤重 → 剥离糖原水 → 趋势净重</span></div>
+        <div class="scroll-x">
+          <table>
+            <thead><tr><th>日期</th><th>档位</th><th class="r">摄入 / 消耗</th><th class="r">糖原</th><th class="r">秤重</th><th class="r">去水</th><th class="r">趋势</th><th class="r">准备度</th></tr></thead>
+            <tbody id="ledger"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 设置 + 日志 -->
+    <section class="grid">
+      <div class="c7 reveal" style="--i:9">
+        <div class="sec-head"><h2><i>viii.</i>设置</h2><span class="aside" id="pf-summary"></span></div>
+
+        <details>
+          <summary>晨起打卡（体重与恢复指标，均可选）</summary>
+          <form id="checkin-form" class="form-row checkin-form">
+            <label class="field">空腹体重 kg<input name="scaleWeightKg" type="number" step="0.01"></label>
+            <label class="field">HRV ms<input name="hrvMs" type="number"></label>
+            <label class="field">静息心率<input name="rhrBpm" type="number"></label>
+            <label class="field">睡眠 h<input name="sleepHours" type="number" step="0.1"></label>
+            <label class="field">深睡 %<input name="deepSleepPct" type="number"></label>
+            <button class="btn">提交</button>
+          </form>
+        </details>
+
+        <details id="pf-details">
+          <summary>档案、阶段目标与供能比</summary>
+          <form id="profile-form" style="margin: 4px 0 16px">
+            <div class="form-row profile-grid">
+              <label class="field">性别<select name="gender"><option value="male">男</option><option value="female">女</option></select></label>
+              <label class="field">年龄<input name="age" type="number" min="10" max="100"></label>
+              <label class="field">身高 cm<input name="heightCm" type="number" min="100" max="250"></label>
+              <label class="field">体重 kg <span id="pf-weight-note"></span><input name="weightKg" type="number" step="0.1"></label>
+              <label class="field span2">活动系数
+                <select name="activityFactor">
+                  <option value="1.2">久坐 ×1.2</option>
+                  <option value="1.375">轻度，每周 1–3 次 ×1.375</option>
+                  <option value="1.55">中度，每周 3–5 次 ×1.55</option>
+                  <option value="1.725">高强度，每周 6–7 次 ×1.725</option>
+                  <option value="1.9">极限 ×1.9</option>
+                </select></label>
+              <label class="field">HRV 基线<input name="hrvBaseline" type="number"></label>
+              <label class="field">静息心率基线<input name="rhrBaseline" type="number"></label>
+              <label class="field" style="grid-column: 1 / -1">阶段目标（周均每日）
+                <select name="goalKcal">
+                  <option value="-500">减脂塑形 −500 千卡</option>
+                  <option value="-300">温和减脂 −300 千卡</option>
+                  <option value="0">维持体重 ±0</option>
+                  <option value="300">干净增肌 +300 千卡</option>
+                  <option value="500">强力增肌 +500 千卡</option>
+                </select></label>
+            </div>
+            <div style="margin-top: 16px">
+              <div class="small muted">周均供能比（碳水循环在此之上按档位重新分配碳水与脂肪）<span id="ratio-sum" style="margin-left:8px"></span></div>
+              <div class="presets">
+                <button type="button" class="btn ghost" onclick="ratioPreset(30, 40, 30)">均衡 30/40/30</button>
+                <button type="button" class="btn ghost" onclick="ratioPreset(35, 45, 20)">增肌 35/45/20</button>
+                <button type="button" class="btn ghost" onclick="ratioPreset(40, 20, 40)">低碳 40/20/40</button>
+              </div>
+              <label class="ratio"><span>蛋白 <b id="rv-p"></b>%</span><input name="ratioP" type="range" min="10" max="70" step="5" oninput="onRatio('p')"></label>
+              <label class="ratio"><span>碳水 <b id="rv-c"></b>%</span><input name="ratioC" type="range" min="5" max="75" step="5" oninput="onRatio('c')"></label>
+              <label class="ratio"><span>脂肪 <b id="rv-f"></b>%</span><input name="ratioF" type="range" min="10" max="70" step="5" oninput="onRatio('f')"></label>
+            </div>
+            <div style="margin-top: 16px; display:flex; gap: 16px; align-items:center; flex-wrap: wrap">
+              <button class="btn">保存</button>
+              <span class="small muted" id="pf-dirty"></span>
+            </div>
+          </form>
+        </details>
+      </div>
+      <div class="c5 reveal" style="--i:10">
+        <div class="sec-head"><h2><i>ix.</i>调用日志</h2></div>
+        <div class="journal" id="journal"></div>
+      </div>
+    </section>
+
+    <footer>
+      <span>Nutrition Tracker MCP · 所有计算在服务端完成，此页只做展示与发起工具调用</span>
+      <span>POST /api/health-webhook</span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script>
+    const LV = { high: "高碳日", medium: "中碳日", low: "低碳日" };
+    const LV_SHORT = { high: "高", medium: "中", low: "低" };
+    const NEXT = { low: "medium", medium: "high", high: "low" };
+    const STATE = { OPTIMAL: ["状态良好", "ok"], CAUTION: ["轻度疲劳", "caution"], OVERRIDE_REST: ["熔断 · 强制恢复", "alert"] };
+    let snap = null, connected = false;
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const sign = (v) => (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(v);
+    const fmt = (v) => Number(v).toLocaleString("en-US");
+    const kg = (v, d = 2) => (v == null ? "—" : Number(v).toFixed(d));
+    const dash = (v) => (v == null ? "—" : v);
+    const kcalOf = (m) => Math.round(m.p * 4 + m.c * 4 + m.f * 9);
+    const time = (iso) => new Date(iso).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
+
+    function toast(msg) {
+      const el = $("toast");
+      el.textContent = msg;
+      el.classList.remove("hidden");
+      clearTimeout(toast.t);
+      toast.t = setTimeout(() => el.classList.add("hidden"), 4000);
+    }
+
+    async function dispatch(tool, args = {}) {
+      if (!connected) return toast("未连接服务端，操作未执行");
+      try {
+        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tool, args }) });
+        const body = await r.json();
+        if (!r.ok) toast(body.error || `请求失败 ${r.status}`);
+        return body;
+      } catch (e) { toast("请求失败：" + e.message); }
+    }
+
+    // ---------- 渲染 ----------
+    function render(s) {
+      snap = s;
+      const t = s.today, p = s.profile, tg = s.targets;
+
+      // 刊头
+      const d = new Date(s.date + "T12:00:00");
+      const zh = d.toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" });
+      const en = d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+      $("dateline").innerHTML = `${esc(zh)}<em>${esc(en)}</em>`;
+      $("level-word").innerHTML = `<span class="lv-${t.carb_level}">${LV[t.carb_level]}</span><small>${t.is_training_day ? "训练日" : "休息日"}</small>`;
+      $("m-tdee").textContent = fmt(p.adaptive_tdee);
+      const off = p.adaptive_tdee - p.formula_tdee;
+      $("m-tdee-diff").textContent = off ? `（公式 ${fmt(p.formula_tdee)}，${sign(off)}）` : "";
+      $("m-target-tdee").textContent = fmt(t.target_tdee);
+      $("m-scale").textContent = t.scale_weight_kg == null ? "未称重" : `${kg(t.scale_weight_kg)} kg`;
+      $("m-ewma").textContent = p.ewma_weight_kg == null ? "—" : `${kg(p.ewma_weight_kg)} kg`;
+      $("m-demo").classList.toggle("hidden", !s.demo);
+      const ev = s.lastEvent;
+      $("evt-time").textContent = ev ? time(ev.created_at) : "—";
+      $("evt-summary").textContent = ev ? ev.summary : "暂无记录";
+
+      // i. 今日配额
+      const remain = tg.kcal - t.intake_kcal;
+      $("hero-num").textContent = fmt(Math.abs(remain));
+      $("hero-num").classList.toggle("over", remain < 0);
+      $("hero-cap").innerHTML = remain >= 0
+        ? `千卡剩余 · 目标 <b>${fmt(tg.kcal)}</b> · 已摄入 <b>${fmt(t.intake_kcal)}</b>`
+        : `<span class="alert">千卡已超出</span> · 目标 <b>${fmt(tg.kcal)}</b> · 已摄入 <b>${fmt(t.intake_kcal)}</b>`;
+      $("quota-base").textContent = `周均基准 ${fmt(s.weeklyBase.kcal)} 千卡`;
+      $("macros").innerHTML = [["蛋白质", t.p_g, tg.p], ["碳水", t.c_g, tg.c], ["脂肪", t.f_g, tg.f]].map(([n, cur, tar]) => {
+        const c = Math.round(cur), r = tar - c, over = r < 0;
+        return `<div class="macro">
+          <span class="name">${n}</span>
+          <span class="val">${c}<small> / ${tar} g</small></span>
+          <span class="rem ${over ? "alert" : ""}">${over ? `超 ${-r} g` : `余 ${r} g`}</span>
+          <div class="bar ${over ? "over" : ""}"><i style="width:${Math.min(100, tar ? (c / tar) * 100 : 0)}%"></i></div>
+        </div>`;
+      }).join("");
+
+      // ii. 身体状态
+      $("ready-num").textContent = dash(t.readiness_score);
+      const st = STATE[t.cns_status];
+      $("ready-state").textContent = st ? st[0] : "今日尚未打卡";
+      $("ready-state").className = `state ${st ? st[1] : ""}`;
+      $("sync-aside").textContent = "准备度 / 100";
+      $("kv").innerHTML = [
+        ["HRV", t.hrv_ms, "ms", `基线 ${p.hrv_baseline}`],
+        ["静息心率", t.rhr_bpm, "bpm", `基线 ${p.rhr_baseline}`],
+        ["睡眠", t.sleep_hours, "h", t.deep_sleep_pct != null ? `深睡 ${t.deep_sleep_pct}%` : ""],
+        ["步数", t.steps, "", ""],
+        ["活动消耗", t.active_kcal, "kcal", ""],
+        ["糖原池", Math.round(t.est_glycogen_g), "g", "估算"]
+      ].map(([k, v, u, note]) => `<div><dt>${k}${note ? ` · ${note}` : ""}</dt><dd>${dash(v)}${v != null && u ? `<small>${u}</small>` : ""}</dd></div>`).join("");
+      $("advice").textContent = t.agent_advice || "";
+      $("focus").textContent = `训练内容：${t.workout_focus}`;
+      document.querySelectorAll(".seg button").forEach((b) => {
+        const on = b.dataset.level === t.carb_level;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-pressed", on);
+      });
+
+      // iii. 膳食
+      $("meal-count").textContent = s.meals.length ? `${s.meals.length} 项` : "";
+      $("meal-tbody").innerHTML = s.meals.length ? s.meals.map((m) => `
+        <tr>
+          <td class="muted">${esc(m.slot)}</td>
+          <td>${esc(m.name)}</td>
+          <td class="r">${m.weight_g}</td>
+          <td class="r">${m.p}</td>
+          <td class="r">${m.c}</td>
+          <td class="r">${m.f}</td>
+          <td class="r"><b>${kcalOf(m)}</b></td>
+          <td class="r"><button class="linkbtn" onclick="delMeal('${esc(m.id)}')" aria-label="删除 ${esc(m.name)}">删除</button></td>
+        </tr>`).join("") : `<tr><td colspan="8" class="muted" style="padding:24px 0">今天还没有记录。选一样食材、填克重，点"记录"。</td></tr>`;
+      fillSelect($("meal-slot"), s.mealSlots.map((x) => [x, x]));
+      fillSelect($("food-select"), s.foods.map((f) => [f.id, `${f.name}　${Math.round(f.p * 4 + f.c * 4 + f.f * 9)} 千卡 · 蛋白 ${f.p} 碳水 ${f.c} 脂肪 ${f.f}`]));
+
+      // iv. 补剂
+      const active = s.supplements.filter((x) => !x.muted);
+      $("supp-count").textContent = `${active.filter((x) => x.taken).length} / ${active.length}`;
+      $("supp-list").innerHTML = s.supplements.map((x) => x.muted ? `
+        <div class="supp muted" aria-disabled="true">
+          <span class="box"></span>
+          <span class="s-name"><b>${esc(x.name)}</b> <span class="muted small">${esc(x.dose)}</span><br><span class="small muted">休息日暂停</span></span>
+        </div>` : `
+        <button class="supp ${x.taken ? "done" : ""}" onclick="toggleSupp('${esc(x.id)}', ${!x.taken})" aria-pressed="${x.taken}">
+          <span class="box"></span>
+          <span class="s-name"><b>${esc(x.name)}</b> <span class="muted small">${esc(x.dose)}</span><br><span class="small muted">${esc(x.timing)}</span></span>
+        </button>`).join("");
+
+      // v. 本周
+      $("week").innerHTML = s.schedule.map((d) => {
+        const isToday = d.day_index === s.todayIndex;
+        const plan = isToday ? t.carb_level : d.plan;
+        const fc = s.forecast.find((x) => x.dayIndex === d.day_index);
+        return `<button class="day ${isToday ? "is-today" : ""}" onclick="cycleDay(${d.day_index}, '${NEXT[d.plan]}')" title="切换为${LV[NEXT[d.plan]]}">
+          <div class="d">${d.day}${isToday ? " · 今天" : ""}</div>
+          <div class="lv lv-${plan}">${LV_SHORT[plan]}</div>
+          <div class="f">${esc(isToday ? t.workout_focus : d.focus)}</div>
+          <div class="k">碳水 ${fc ? fc.cG : "—"} g · ${fc ? fmt(fc.intakeKcal) : "—"}</div>
+        </button>`;
+      }).join("");
+      $("chart").innerHTML = forecastSvg(s.forecast, p.body_weight_kg);
+      const last = s.forecast[s.forecast.length - 1];
+      $("chart-end").textContent = `第 7 天：净重 ${kg(last.predictedTissueKg)} kg（${sign(+(last.predictedTissueKg - p.body_weight_kg).toFixed(2))}）`;
+
+      // vi. 校准
+      const cal = s.calibrationPreview;
+      $("figs").innerHTML = cal.ok ? [
+        ["热量收支推算", `${sign(cal.expectedDeltaKg)}`, "kg"],
+        ["实际趋势净重", `${sign(cal.actualEwmaDeltaKg)}`, `kg · 秤重 ${sign(cal.actualScaleDeltaKg)}`],
+        ["未解释漂移", `${sign(cal.rawDriftKcal)}`, "千卡 / 天"],
+        ["建议修正", `${sign(cal.appliedDeltaKcal)}`, `千卡 · 范围 ${fmt(cal.safeRange[0])}–${fmt(cal.safeRange[1])}`]
+      ].map(([k, v, u]) => `<div><dt>${k}</dt><dd>${v}<small>${u}</small></dd></div>`).join("") : "";
+      $("cal-note").textContent = cal.ok ? cal.diagnosticNote : cal.reason;
+      $("cal-btn").disabled = !cal.ok;
+      $("cal-history").innerHTML = s.calibrationHistory.length ? `<table><thead><tr><th>日期</th><th class="r">TDEE</th><th class="r">修正</th></tr></thead><tbody>${
+        s.calibrationHistory.map((c) => `<tr><td>${c.calibrated_date.slice(5)}</td><td class="r">${fmt(c.old_tdee)} → <b>${fmt(c.new_tdee)}</b></td><td class="r">${sign(c.applied_delta_kcal)}</td></tr>`).join("")
+      }</tbody></table>` : `<p class="small muted">尚无校准记录。</p>`;
+
+      // vii. 账本
+      $("ledger").innerHTML = s.history.map((r) => {
+        const shift = r.scale_weight_kg != null && r.dewatered_weight_kg != null ? +(r.scale_weight_kg - r.dewatered_weight_kg).toFixed(2) : null;
+        return `<tr class="${r.date === s.date ? "today" : ""}">
+          <td>${r.date.slice(5)}</td>
+          <td class="tag lv-${r.carb_level}">${LV_SHORT[r.carb_level]}</td>
+          <td class="r">${r.intake_kcal ? fmt(r.intake_kcal) : "—"} / ${fmt(r.target_tdee)}</td>
+          <td class="r">${Math.round(r.est_glycogen_g)}${shift != null ? ` <span class="muted small">${sign(shift)}</span>` : ""}</td>
+          <td class="r">${kg(r.scale_weight_kg)}</td>
+          <td class="r">${kg(r.dewatered_weight_kg)}</td>
+          <td class="r"><b>${kg(r.ewma_weight_kg)}</b></td>
+          <td class="r ${r.cns_status === "OVERRIDE_REST" ? "alert" : ""}">${dash(r.readiness_score)}</td>
+        </tr>`;
+      }).join("");
+
+      // viii. 设置
+      $("pf-summary").textContent = `BMR ${fmt(p.bmr)} · 公式 ${fmt(p.formula_tdee)} · 目标 ${sign(p.goal_kcal)} · P${p.ratio_p}/C${p.ratio_c}/F${p.ratio_f}`;
+      $("pf-weight-note").textContent = p.ewma_weight_kg != null ? "（已用趋势体重）" : "";
+      const pf = $("profile-form");
+      if (!pf.contains(document.activeElement) && !pf.dataset.dirty) {
+        pf.gender.value = p.gender; pf.age.value = p.age; pf.heightCm.value = p.height_cm;
+        pf.weightKg.value = p.weight_kg; pf.weightKg.disabled = p.ewma_weight_kg != null;
+        pf.activityFactor.value = String(p.activity_factor);
+        pf.hrvBaseline.value = p.hrv_baseline; pf.rhrBaseline.value = p.rhr_baseline;
+        pf.goalKcal.value = String(p.goal_kcal);
+        pf.ratioP.value = p.ratio_p; pf.ratioC.value = p.ratio_c; pf.ratioF.value = p.ratio_f;
+        showRatio();
+      }
+
+      // ix. 日志
+      $("journal").innerHTML = s.journals.map((j) => `<div>
+        <time>${j.created_at.slice(5, 10)} ${time(j.created_at)}</time>
+        <span><p>${esc(j.summary)}</p><small>${esc(j.source)} · ${esc(j.tool_name)}</small></span>
+      </div>`).join("");
+
+    }
+
+    // 7 日预测折线：起点 + 7 天，两条线
+    function forecastSvg(fc, start) {
+      const W = 1120, H = 200, L = 8, R = 56, T = 16, B = 32;
+      const pts = [{ label: "现在", s: start, t: start }, ...fc.map((d) => ({ label: d.day.slice(1), s: d.predictedScaleKg, t: d.predictedTissueKg, today: d.offset === 0 }))];
+      const vals = pts.flatMap((x) => [x.s, x.t]);
+      let lo = Math.min(...vals), hi = Math.max(...vals);
+      const pad = Math.max(0.15, (hi - lo) * 0.15); lo -= pad; hi += pad;
+      const x = (i) => L + (i * (W - L - R)) / (pts.length - 1);
+      const y = (v) => T + ((hi - v) / (hi - lo)) * (H - T - B);
+      const line = (k) => pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join("");
+      const ticks = [hi - pad, (hi + lo) / 2, lo + pad];
+      return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="未来 7 天体重预测">
+        ${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--rule)" stroke-width="1"/>
+          <text x="${W - R + 8}" y="${y(v) + 4}" font-size="12" fill="var(--ink-2)" font-family="var(--sans)">${v.toFixed(2)}</text>`).join("")}
+        <path d="${line("s")}" fill="none" stroke="var(--ink-2)" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <path d="${line("t")}" fill="none" stroke="var(--ink)" stroke-width="2"/>
+        ${pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.t)}" r="${i === 0 ? 4 : 3}" fill="${i === 0 ? "var(--accent)" : "var(--paper)"}" stroke="var(--ink)" stroke-width="1.5"/>
+          <text x="${x(i)}" y="${H - 8}" font-size="12" text-anchor="${i === 0 ? "start" : "middle"}" fill="${p.today ? "var(--accent)" : "var(--ink-2)"}" font-family="var(--sans)">${p.label}</text>`).join("")}
+      </svg>`;
+    }
+
+    // 只在选项变化时重建，避免 SSE 推送打断正在选的下拉框
+    function fillSelect(el, pairs) {
+      const sig = JSON.stringify(pairs);
+      if (el.dataset.sig === sig) return;
+      const keep = el.dataset.pending || el.value;
+      el.innerHTML = pairs.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
+      el.dataset.sig = sig;
+      if (pairs.some(([v]) => v === keep)) { el.value = keep; delete el.dataset.pending; }
+    }
+
+    // ---------- 供能比滑块（调一项，另两项补齐到 100%） ----------
+    function showRatio() {
+      const f = $("profile-form");
+      const r = { p: +f.ratioP.value, c: +f.ratioC.value, f: +f.ratioF.value };
+      for (const k of ["p", "c", "f"]) $(`rv-${k}`).textContent = r[k];
+      const sum = r.p + r.c + r.f;
+      $("ratio-sum").textContent = sum === 100 ? "" : `合计 ${sum}%，需为 100%`;
+      $("ratio-sum").className = sum === 100 ? "" : "alert";
+      $("pf-dirty").textContent = f.dataset.dirty ? "有未保存的修改" : "";
+    }
+    function onRatio(changed) {
+      const f = $("profile-form");
+      let p = +f.ratioP.value, c = +f.ratioC.value, fat = +f.ratioF.value;
+      const rem = 100 - { p, c, f: fat }[changed];
+      const r5 = (v) => Math.round(v / 5) * 5;
+      if (changed === "p") { c = Math.max(5, Math.min(75, r5(rem * 0.55))); fat = 100 - p - c; }
+      else if (changed === "c") { p = Math.max(10, Math.min(70, r5(rem * 0.5))); fat = 100 - c - p; }
+      else { p = Math.max(10, Math.min(70, r5(rem * 0.45))); c = 100 - fat - p; }
+      f.ratioP.value = p; f.ratioC.value = c; f.ratioF.value = fat;
+      f.dataset.dirty = "1";
+      showRatio();
+    }
+    function ratioPreset(p, c, fat) {
+      const f = $("profile-form");
+      f.ratioP.value = p; f.ratioC.value = c; f.ratioF.value = fat;
+      f.dataset.dirty = "1";
+      showRatio();
+    }
+
+    // ---------- 交互 ----------
+    const setLevel = (level) => dispatch("set_day_context", { carbLevel: level });
+    const cycleDay = (dayIndex, plan) => dispatch("update_weekly_schedule", { dayIndex, plan });
+    const toggleSupp = (supplementId, taken) => dispatch("update_supplement_stack", { supplementId, taken });
+    const delMeal = (mealId) => dispatch("delete_meal_item", { mealId });
+    async function calibrate() {
+      const r = await dispatch("calibrate_metabolic_tdee", { windowDays: 7 });
+      if (r && r.ok === false && /force=true/.test(r.error || "") && confirm("今天已经校准过，再执行会叠加修正。仍要执行？")) {
+        await dispatch("calibrate_metabolic_tdee", { windowDays: 7, force: true });
+      }
+    }
+    const numFields = (form) => Object.fromEntries(
+      [...new FormData(form)].filter(([, v]) => v !== "").map(([k, v]) => [k, isNaN(Number(v)) ? v : Number(v)])
+    );
+
+    $("checkin-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const args = numFields(e.target);
+      if (!Object.keys(args).length) return toast("至少填一项");
+      const r = await dispatch("log_morning_checkin", args);
+      if (r && r.ok !== false) e.target.reset();
+    });
+    $("meal-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const f = e.target;
+      dispatch("log_meal_items", { mealSlot: f.slot.value, items: [{ foodId: f.foodId.value, weightGrams: Number(f.weight.value) || 100 }] });
+    });
+    $("food-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const r = await dispatch("add_food_to_library", { name: f.name.value.trim(), p: Number(f.p.value), c: Number(f.c.value), f: Number(f.f.value) });
+      if (r && r.foodId) { f.reset(); $("food-select").dataset.pending = r.foodId; }
+    });
+    $("profile-form").addEventListener("input", (e) => { e.currentTarget.dataset.dirty = "1"; showRatio(); });
+    $("profile-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const args = numFields(f);
+      if (f.weightKg.disabled) delete args.weightKg;
+      const r = await dispatch("set_profile", args);
+      if (r && r.ok) {
+        delete f.dataset.dirty;
+        document.activeElement.blur();
+        // SSE 推送可能在 dirty 清除前就到了并被跳过，这里主动取一次最新快照回填
+        render(await (await fetch("/api/snapshot")).json());
+      }
+    });
+
+    // ---------- SSE ----------
+    function setConn(ok) {
+      connected = ok;
+      $("conn-dot").classList.toggle("off", !ok);
+      $("conn-text").textContent = ok ? "实时" : "离线";
+      $("offline").classList.toggle("hidden", ok);
+    }
+    // 先拉一次快照尽快出首屏，SSE 负责之后的实时更新
+    fetch("/api/snapshot").then((r) => r.json()).then((s) => { if (!snap) render(s); }).catch(() => {});
+    const es = new EventSource("/api/stream");
+    es.onopen = () => setConn(true);
+    es.onmessage = (e) => render(JSON.parse(e.data));
+    es.onerror = () => setConn(false); // EventSource 自动重连
+  </script>
+</body>
+</html>
