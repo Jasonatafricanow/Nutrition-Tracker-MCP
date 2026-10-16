@@ -1,6 +1,6 @@
 {
   "name": "nutrition-tracker-mcp",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "private": true,
   "description": "碳水循环 + 动态 TDEE 校准的 MCP 服务端与观察窗",
   "type": "module",

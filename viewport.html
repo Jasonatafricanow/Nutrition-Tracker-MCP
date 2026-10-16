@@ -258,6 +258,8 @@
           <label class="field">克重<input name="weight" type="number" value="100" min="1" step="any" inputmode="decimal"></label>
           <button class="btn">记录</button>
         </form>
+          <button class="btn" onclick="dispatch('mark_intake_complete',{complete:true})">今日饮食已记录完整</button>
+
         <details>
           <summary>食材库里没有？按每 100g 营养新增</summary>
           <form id="food-form" class="form-row food-form">
@@ -288,8 +290,8 @@
       <div class="chart">
         <div id="chart"></div>
         <div class="legend">
-          <span><i class="dash"></i>预测秤重（含糖原水）</span>
-          <span><i></i>预测组织净重</span>
+          <span><i class="dash"></i>情景体重（非临床预测）</span>
+          <span><i></i>情景能量收支轨迹</span>
           <span id="chart-end"></span>
         </div>
       </div>
@@ -301,14 +303,15 @@
         <div class="sec-head"><h2><i>vi.</i>代谢校准</h2><span class="aside">阻尼 0.35 · 单步 ±120</span></div>
         <dl class="figs" id="figs"></dl>
         <p class="note" id="cal-note"></p>
-        <button class="btn" id="cal-btn" onclick="calibrate()">执行校准并写入账本</button>
+        <button class="btn" id="confirm-cal-btn" onclick="applyCalibration()">确认写入校准估计</button>
+        <button class="btn" id="cal-btn" onclick="calibrate()">预览 TDEE 校准建议（不自动写入）</button>
         <div id="cal-history" style="margin-top:24px"></div>
       </div>
       <div class="c7 reveal" style="--i:8">
-        <div class="sec-head"><h2><i>vii.</i>近两周账本</h2><span class="aside">秤重 → 剥离糖原水 → 趋势净重</span></div>
+        <div class="sec-head"><h2><i>vii.</i>近两周账本</h2><span class="aside">实测体重 → EWMA 趋势（不扣假设糖原水）</span></div>
         <div class="scroll-x">
           <table>
-            <thead><tr><th>日期</th><th>档位</th><th class="r">摄入 / 消耗</th><th class="r">糖原</th><th class="r">秤重</th><th class="r">去水</th><th class="r">趋势</th><th class="r">准备度</th></tr></thead>
+            <thead><tr><th>日期</th><th>档位</th><th class="r">摄入 / 消耗</th><th class="r">糖原</th><th class="r">秤重</th><th class="r">参考值</th><th class="r">趋势</th><th class="r">准备度</th></tr></thead>
             <tbody id="ledger"></tbody>
           </table>
         </div>
@@ -325,6 +328,7 @@
           <form id="checkin-form" class="form-row checkin-form">
             <label class="field">空腹体重 kg<input name="scaleWeightKg" type="number" step="0.01"></label>
             <label class="field">HRV ms<input name="hrvMs" type="number"></label>
+            <label class="field">HRV 类型<select name="hrvMetric"><option value="RMSSD">RMSSD</option><option value="SDNN">SDNN</option></select></label>
             <label class="field">静息心率<input name="rhrBpm" type="number"></label>
             <label class="field">睡眠 h<input name="sleepHours" type="number" step="0.1"></label>
             <label class="field">深睡 %<input name="deepSleepPct" type="number"></label>
@@ -415,10 +419,20 @@
       toast.t = setTimeout(() => el.classList.add("hidden"), 4000);
     }
 
+    let csrfToken = null;
+    async function sessionToken() {
+      if (!csrfToken) {
+        const res = await fetch("/api/session", {credentials:"same-origin"});
+        if (!res.ok) throw Error("会话初始化失败");
+        csrfToken = (await res.json()).csrfToken;
+      }
+      return csrfToken;
+    }
     async function dispatch(tool, args = {}) {
       if (!connected) return toast("未连接服务端，操作未执行");
       try {
-        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tool, args }) });
+        const csrf = await sessionToken();
+        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json", "X-Nutrition-CSRF":csrf }, body: JSON.stringify({ tool, args }) });
         const body = await r.json();
         if (!r.ok) toast(body.error || `请求失败 ${r.status}`);
         return body;
@@ -536,12 +550,13 @@
       const cal = s.calibrationPreview;
       $("figs").innerHTML = cal.ok ? [
         ["热量收支推算", `${sign(cal.expectedDeltaKg)}`, "kg"],
-        ["实际趋势净重", `${sign(cal.actualEwmaDeltaKg)}`, `kg · 秤重 ${sign(cal.actualScaleDeltaKg)}`],
+        ["实测体重回归趋势", `${sign(cal.actualEwmaDeltaKg)}`, `kg · 秤重 ${sign(cal.actualScaleDeltaKg)}`],
         ["未解释漂移", `${sign(cal.rawDriftKcal)}`, "千卡 / 天"],
         ["建议修正", `${sign(cal.appliedDeltaKcal)}`, `千卡 · 范围 ${fmt(cal.safeRange[0])}–${fmt(cal.safeRange[1])}`]
       ].map(([k, v, u]) => `<div><dt>${k}</dt><dd>${v}<small>${u}</small></dd></div>`).join("") : "";
       $("cal-note").textContent = cal.ok ? cal.diagnosticNote : cal.reason;
       $("cal-btn").disabled = !cal.ok;
+      $("confirm-cal-btn").disabled = !cal.ok || cal.reusedEvidence;
       $("cal-history").innerHTML = s.calibrationHistory.length ? `<table><thead><tr><th>日期</th><th class="r">TDEE</th><th class="r">修正</th></tr></thead><tbody>${
         s.calibrationHistory.map((c) => `<tr><td>${c.calibrated_date.slice(5)}</td><td class="r">${fmt(c.old_tdee)} → <b>${fmt(c.new_tdee)}</b></td><td class="r">${sign(c.applied_delta_kcal)}</td></tr>`).join("")
       }</tbody></table>` : `<p class="small muted">尚无校准记录。</p>`;
@@ -583,7 +598,7 @@
 
     }
 
-    // 7 日预测折线：起点 + 7 天，两条线
+    // 七日示意情景：并非真实体重预测区间，尤其糖原水参数未验证
     function forecastSvg(fc, start) {
       const W = 1120, H = 200, L = 8, R = 56, T = 16, B = 32;
       const pts = [{ label: "现在", s: start, t: start }, ...fc.map((d) => ({ label: d.day.slice(1), s: d.predictedScaleKg, t: d.predictedTissueKg, today: d.offset === 0 }))];
@@ -649,10 +664,15 @@
     const toggleSupp = (supplementId, taken) => dispatch("update_supplement_stack", { supplementId, taken });
     const delMeal = (mealId) => dispatch("delete_meal_item", { mealId });
     async function calibrate() {
-      const r = await dispatch("calibrate_metabolic_tdee", { windowDays: 7 });
-      if (r && r.ok === false && /force=true/.test(r.error || "") && confirm("今天已经校准过，再执行会叠加修正。仍要执行？")) {
-        await dispatch("calibrate_metabolic_tdee", { windowDays: 7, force: true });
-      }
+      const r = await dispatch("calibrate_metabolic_tdee", { windowDays: 14 });
+      toast(r?.ok ? r.diagnosticNote : (r?.reason || "无法计算校准"));
+    }
+    async function applyCalibration() {
+      const preview = await dispatch("calibrate_metabolic_tdee", { windowDays: 14 });
+      if (!preview?.ok || preview.reusedEvidence) return toast(preview?.reason || "数据不足或已使用过此窗口");
+      if (!confirm(`仅为估计值，误差可能来自记录或体液波动。确认调整 TDEE ${preview.appliedDeltaKcal} kcal 吗？`)) return;
+      const applied = await dispatch("calibrate_metabolic_tdee", { windowDays: 14, apply: true });
+      toast(applied?.ok ? `当前 TDEE ${applied.newTdee} kcal` : (applied?.reason || "未执行"));
     }
     const numFields = (form) => Object.fromEntries(
       [...new FormData(form)].filter(([, v]) => v !== "").map(([k, v]) => [k, isNaN(Number(v)) ? v : Number(v)])
@@ -661,6 +681,7 @@
     $("checkin-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const args = numFields(e.target);
+      if (args.hrvMs == null) delete args.hrvMetric;
       if (!Object.keys(args).length) return toast("至少填一项");
       const r = await dispatch("log_morning_checkin", args);
       if (r && r.ok !== false) e.target.reset();
