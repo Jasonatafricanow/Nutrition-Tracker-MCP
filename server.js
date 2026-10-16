@@ -3,7 +3,7 @@
 //   - HTTP 观察窗 + SSE 实时推送 + 手机健康 Webhook
 // 多个进程共用同一个 SQLite 文件时，靠 PRAGMA data_version 轮询感知别的进程的写入。
 import express from "express";
-import cors from "cors";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -20,11 +20,41 @@ const USE_STDIO = !process.stdin.isTTY && !process.argv.includes("--no-stdio");
 
 const log = (...a) => console.error("[Nutrition Tracker MCP]", ...a); // stdout 留给 MCP 协议
 const engine = createEngine(DB_PATH, { demo: DEMO });
+const csrfToken = randomBytes(32).toString("hex");
+const apiToken = process.env.NUTRITION_API_TOKEN;
+const webhookToken = process.env.HEALTH_WEBHOOK_TOKEN;
+const matches = (a, b) => {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const x = Buffer.from(a), y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+};
+// Browser clients must first read a same-origin session token; no wildcard CORS.
+// Programmatic HTTP clients may use NUTRITION_API_TOKEN. MCP over stdio is separate.
+function sameOrigin(req) {
+  const origin = req.get("Origin");
+  if (!origin) return true; // non-browser clients may omit Origin but still need bearer auth
+  try { return new URL(origin).host === req.get("host") && ["http:","https:"].includes(new URL(origin).protocol); }
+  catch { return false; }
+}
+function authorizeDispatch(req, res, next) {
+  if (!sameOrigin(req)) return res.status(403).json({ok:false,error:"Cross-origin write denied"});
+  const token = req.get("X-Nutrition-CSRF");
+  const bearer = req.get("Authorization")?.replace(/^Bearer /i, "");
+  if (matches(token, csrfToken) || (apiToken && matches(bearer, apiToken))) return next();
+  return res.status(401).json({ok:false,error:"Write authentication required"});
+}
+function authorizeWebhook(req, res, next) {
+  if (!webhookToken) return res.status(503).json({ok:false,error:"Webhook disabled; configure HEALTH_WEBHOOK_TOKEN"});
+  const bearer = req.get("Authorization")?.replace(/^Bearer /i, "");
+  if (!matches(bearer, webhookToken)) return res.status(401).json({ok:false,error:"Webhook authentication required"});
+  next();
+}
 
 // ==================== HTTP + SSE ====================
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.disable("x-powered-by");
+app.use(express.json({limit:"128kb"}));
+app.use((req,res,next) => { res.setHeader("Cache-Control", "no-store"); next(); });
 
 const sseClients = new Set();
 function broadcast() {
@@ -40,6 +70,10 @@ function run(tool, args, source) {
 }
 
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "viewport.html")));
+app.get("/api/session", (req,res) => {
+  if (!sameOrigin(req)) return res.status(403).json({ok:false});
+  res.json({csrfToken});
+});
 
 app.get("/api/snapshot", (req, res) => res.json(engine.buildSnapshot()));
 
@@ -54,7 +88,7 @@ app.get("/api/stream", (req, res) => {
   req.on("close", () => sseClients.delete(res));
 });
 
-app.post("/api/mcp-dispatch", (req, res) => {
+app.post("/api/mcp-dispatch", authorizeDispatch, (req, res) => {
   try {
     res.json(run(req.body?.tool, req.body?.args, "VIEWPORT"));
   } catch (e) {
@@ -63,12 +97,15 @@ app.post("/api/mcp-dispatch", (req, res) => {
 });
 
 // 兼容 iOS 快捷指令 / Health Auto Export / Health Connect：字段都可选
-app.post("/api/health-webhook", (req, res) => {
+app.post("/api/health-webhook", authorizeWebhook, (req, res) => {
   const b = req.body || {};
   const num = (v) => (v === undefined || v === null || v === "" ? undefined : Number(v));
   try {
     const result = run("log_morning_checkin", {
       scaleWeightKg: num(b.weightKg ?? b.scaleWeightKg),
+      measuredAt: b.measuredAt,
+      sourceEventId: b.sourceEventId,
+      hrvMetric: b.hrvMetric,
       hrvMs: num(b.hrvMs),
       rhrBpm: num(b.rhrBpm),
       sleepHours: num(b.sleepHours),
@@ -98,13 +135,13 @@ setInterval(() => {
 // 跨过零点时让观察窗切到新的一天
 let lastDate = engine.buildSnapshot().date;
 setInterval(() => {
-  const d = new Date().toLocaleDateString("sv-SE");
+  const d = engine.buildSnapshot().date;
   if (d !== lastDate) { lastDate = d; broadcast(); }
 }, 60_000).unref();
 
 // ==================== MCP ====================
 if (USE_STDIO) {
-  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.0.0" });
+  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.1.0" });
 
   for (const [name, def] of Object.entries(TOOL_DEFS)) {
     mcp.registerTool(name, { description: def.description, inputSchema: def.shape }, async (args) => {

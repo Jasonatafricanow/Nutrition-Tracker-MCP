@@ -1,6 +1,7 @@
 // Nutrition Tracker MCP 状态引擎：SQLite 账本 + 碳水循环 + 生物遥测 + 动态 TDEE 校准。
 // 不依赖 HTTP / MCP，server.js 负责把这里的工具暴露出去。
 import { DatabaseSync } from "node:sqlite";
+import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
 
 // ==================== 1. 生理常量 ====================
@@ -12,7 +13,7 @@ export const CARB_PRESETS = {
     tdeeFactor: 1.06,
     glycogenDeltaG: 120,
     defaultFocus: "下肢臀腿 / 背部高容量复合日",
-    advice: "糖原超量恢复窗口：练前 90min 补充 35% 碳水，练后即刻补充 45% 高GI快碳+分离乳清；全天严格控脂。"
+    advice: "高碳日仅是营养分配计划。结合训练负荷安排摄入；围训练期进食时机因人而异，不作固定比例或补剂处方。"
   },
   medium: {
     label: "中碳日 (MED CARB)",
@@ -21,7 +22,7 @@ export const CARB_PRESETS = {
     tdeeFactor: 1.00,
     glycogenDeltaG: 0,
     defaultFocus: "胸肩推类 / 手臂肌肥大",
-    advice: "稳态代谢窗口：70% 碳水集中于围训练期，早晚餐适量加入全蛋、牛油果或深海鱼维持激素合成。"
+    advice: "中碳日：结合实际训练需求分配蛋白质、脂肪及碳水，注意饮食多样化。"
   },
   low: {
     label: "低碳日 (LOW CARB)",
@@ -30,7 +31,7 @@ export const CARB_PRESETS = {
     tdeeFactor: 0.94,
     glycogenDeltaG: -110,
     defaultFocus: "主动恢复 / 筋膜放松 / Zone 2",
-    advice: "胰岛素敏感度重塑窗口：碳水下调、脂肪补位，蛋白质保持不变保护瘦体重，自动静默练前氮泵与咖啡因。"
+    advice: "低碳日仅是计划安排，不代表改善胰岛素敏感性的医学干预。恢复日仍需确保总能量和个人碳水需求。"
   }
 };
 
@@ -56,11 +57,11 @@ const DEFAULT_SCHEDULE = [
 
 const DEFAULT_SUPPLEMENTS = [
   ["creatine", "一水肌酸 (Creatine)", "5g", "练后 / 固定时间", 1],
-  ["caffeine", "无水咖啡因 / 氮泵", "220mg", "练前 30 分钟", 0],
+  ["caffeine", "无水咖啡因 / 氮泵", "自定义", "按个人耐受记录", 0],
   ["whey", "分离乳清蛋白粉", "30g", "练后即刻", 1],
   ["electrolytes", "复合电解质饮", "1000mg", "训练中饮用", 0],
   ["omega3", "高纯度鱼油 (Omega-3)", "2000mg", "随晚餐服用", 1],
-  ["d3_mag", "维生素 D3 + 甘氨酸镁", "4000IU+300mg", "睡前 45 分钟", 1]
+  ["d3_mag", "维生素 D3 + 甘氨酸镁", "自定义", "依个人需求或医嘱", 1]
 ];
 
 // 每 100g 可食部营养
@@ -130,22 +131,34 @@ export function readinessScore({ hrv, rhr, sleep, hrvBaseline, rhrBaseline }) {
   const rhrScore = clamp(100 - rhrDelta * 8, 0, 100);
   const sleepScore = clamp((sleep / 8.0) * 100, 0, 100);
   const score = Math.round(0.45 * hrvScore + 0.30 * rhrScore + 0.25 * sleepScore);
-  const status = score < 55 || rhrDelta >= 7 ? "OVERRIDE_REST" : score < 75 ? "CAUTION" : "OPTIMAL";
+  const status = score < 55 || rhrDelta >= 7 ? "RECOVERY_FLAG" : score < 75 ? "CAUTION" : "OPTIMAL";
   return { score, status, rhrDelta };
 }
 
 // 用本地时区算日期，避免 toISOString() 在 UTC+8 早上 8 点前落到前一天
-export function localDateStr(d = new Date()) {
-  return d.toLocaleDateString("sv-SE");
+export function localDateStr(d = new Date(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  // Explicit user time zone; independent of the Node process TZ and host locale.
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(d);
+  const part = (t) => parts.find((x) => x.type === t).value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }
 function offsetDateStr(base, offsetDays) {
-  const d = new Date(base + "T12:00:00");
-  d.setDate(d.getDate() + offsetDays);
-  return localDateStr(d);
+  const d = new Date(base + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+function dayDiff(a, b) {
+  return Math.round((Date.parse(b + "T12:00:00Z") - Date.parse(a + "T12:00:00Z")) / 86400000);
 }
 export function weekdayIndex(dateStr) {
-  return (new Date(dateStr + "T12:00:00").getDay() + 6) % 7; // 0=周一
+  return (new Date(dateStr + "T12:00:00Z").getUTCDay() + 6) % 7;
 }
+const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const d = new Date(value + "T12:00:00Z");
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}, "无效日历日期");
 
 // ==================== 3. 工具参数定义 (MCP 与 HTTP 共用) ====================
 const carbLevel = z.enum(["high", "medium", "low"]);
@@ -180,10 +193,13 @@ export const TOOL_DEFS = {
     }
   },
   log_morning_checkin: {
-    description: "录入晨起空腹秤重与手机健康遥测(HRV/静息心率/睡眠等)。秤重会剥离糖原结合水、更新 EWMA 净重；HRV/RHR/睡眠会重算 CNS 准备度，红区自动熔断为低碳恢复日。字段都可选，只更新给出的部分。",
+    description: "记录实测体重与可选健康指标，按明确时区归档，EWMA 仅平滑实测体重；恢复评分为未验证的观察指标，不会自动修改训练或饮食计划。",
     shape: {
       scaleWeightKg: z.number().min(30).max(250).optional().describe("晨起空腹体重秤读数 (kg)"),
-      hrvMs: z.number().positive().optional().describe("心率变异性 RMSSD (ms)"),
+      measuredAt: z.string().datetime({ offset: true }).optional().describe("原始测量时间，含 UTC 时区偏移；历史同步按个人时区归档"),
+      sourceEventId: z.string().max(200).optional().describe("数据源记录唯一 ID，相同 source+ID 重复发送不重复写入"),
+      hrvMetric: z.enum(["SDNN", "RMSSD"]).optional().describe("HRV 度量类型；Apple Health 常见为 SDNN"),
+      hrvMs: z.number().positive().optional().describe("HRV 读数 (ms)；必须明确 SDNN 或 RMSSD，不混为一谈"),
       rhrBpm: z.number().positive().optional().describe("晨起静息心率 (bpm)"),
       sleepHours: z.number().min(0).max(24).optional().describe("昨夜睡眠时长 (h)"),
       deepSleepPct: z.number().min(0).max(100).optional().describe("深睡比例 (%)"),
@@ -192,11 +208,16 @@ export const TOOL_DEFS = {
     }
   },
   calibrate_metabolic_tdee: {
-    description: "按账本里『热量收支推算的净重变化』与『实际去水 EWMA 净重变化』的偏差，阻尼修正基准 TDEE。同一天只执行一次，除非 force=true。",
+    description: "按实际日历日期的完整饮食账本与原始体重趋势预览 TDEE。默认为预览，不写入；apply=true 且数据满足要求时才应用，禁止重复使用同一证据。",
     shape: {
-      windowDays: z.number().int().min(3).max(28).default(7).describe("回溯窗口（有秤重的天数）"),
-      force: z.boolean().default(false).describe("今天已校准过仍强制再执行")
+      windowDays: z.number().int().min(7).max(56).default(14).describe("实际日历日数；建议 14–28 天"),
+      apply: z.boolean().default(false).describe("显式允许写入经过完整数据检查的估计修正"),
+      force: z.boolean().default(false).describe("兼容旧客户端；无法绕过相同证据的幂等保护")
     }
+  },
+  mark_intake_complete: {
+    description: "用户确认指定日期整天饮食已记完整；校准只使用确认过的日记。补录或删除食物会自动取消完成标记。",
+    shape: { date: calendarDate.optional(), complete: z.boolean().default(true) }
   },
   set_day_context: {
     description: "手动切换今天的碳水档位 (high/medium/low)、训练/休息日、训练部位与当日建议，自动重算宏量配额与补剂静默",
@@ -233,7 +254,7 @@ export const TOOL_DEFS = {
       name: z.string().min(1),
       p: z.number().min(0).describe("蛋白质 g/100g"),
       c: z.number().min(0).describe("碳水 g/100g"),
-      f: z.number().min(0).describe("脂肪 g/100g")
+      f: z.number().min(0).max(100).describe("脂肪 g/100g")
     }
   },
   update_supplement_stack: {
@@ -249,7 +270,9 @@ export const TOOL_DEFS = {
 export class ToolError extends Error {}
 
 // ==================== 4. 引擎 ====================
-export function createEngine(dbPath, { demo = false, now = () => new Date() } = {}) {
+export function createEngine(dbPath, { demo = false, now = () => new Date(), timeZone = process.env.NUTRITION_TIME_ZONE || Intl.DateTimeFormat().resolvedOptions().timeZone } = {}) {
+  // Fail fast on an invalid IANA time zone.
+  new Intl.DateTimeFormat("en-US", { timeZone });
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;");
 
@@ -284,6 +307,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
       workout_focus TEXT NOT NULL,
       agent_advice TEXT,
       intake_kcal INTEGER NOT NULL DEFAULT 0,
+      intake_complete INTEGER NOT NULL DEFAULT 0,
       p_g REAL NOT NULL DEFAULT 0,
       c_g REAL NOT NULL DEFAULT 0,
       f_g REAL NOT NULL DEFAULT 0,
@@ -293,6 +317,8 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
       dewatered_weight_kg REAL,
       ewma_weight_kg REAL,
       hrv_ms REAL,
+      hrv_metric TEXT,
+      weight_measured_at TEXT,
       rhr_bpm REAL,
       sleep_hours REAL,
       deep_sleep_pct REAL,
@@ -343,7 +369,14 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
       applied_delta_kcal INTEGER NOT NULL,
       old_tdee INTEGER NOT NULL,
       new_tdee INTEGER NOT NULL,
-      diagnostic_note TEXT NOT NULL
+      diagnostic_note TEXT NOT NULL,
+      evidence_hash TEXT,
+      last_observation_date TEXT
+    );
+    CREATE TABLE IF NOT EXISTS health_ingest_events (
+      source TEXT NOT NULL, source_event_id TEXT NOT NULL,
+      measured_at TEXT, received_at TEXT NOT NULL, ledger_date TEXT NOT NULL,
+      PRIMARY KEY (source, source_event_id)
     );
     CREATE TABLE IF NOT EXISTS mcp_event_journal (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -363,12 +396,22 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
     if (!profileCols.has(col)) db.exec(`ALTER TABLE user_profile ADD COLUMN ${col} INTEGER NOT NULL DEFAULT ${def}`);
   }
 
+  for (const [table, columns] of Object.entries({
+    daily_ledger: [["intake_complete", "INTEGER NOT NULL DEFAULT 0"], ["hrv_metric", "TEXT"], ["weight_measured_at", "TEXT"]],
+    tdee_calibrations: [["evidence_hash", "TEXT"], ["last_observation_date", "TEXT"]]
+  })) {
+    const have = new Set(q(`PRAGMA table_info(${table})`).all().map((x) => x.name));
+    for (const [column, definition] of columns) {
+      if (!have.has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
+  }
+
   const tx = (fn) => {
     db.exec("BEGIN IMMEDIATE");
     try { const r = fn(); db.exec("COMMIT"); return r; }
     catch (e) { db.exec("ROLLBACK"); throw e; }
   };
-  const today = () => localDateStr(now());
+  const today = () => localDateStr(now(), timeZone);
   const nowIso = () => now().toISOString();
 
   // ---------- 初始化默认数据 ----------
@@ -416,10 +459,11 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
           Math.round(p.adaptive_tdee * CARB_PRESETS[plan].tdeeFactor), gly, scale, dew, ewma,
           hrv, rhr, sleep, r.score, r.status);
       }
+      q("UPDATE daily_ledger SET intake_complete = 1 WHERE date < ? AND intake_kcal > 0").run(t);
       q("UPDATE user_profile SET ewma_weight_kg = 74.92, weight_kg = 74.46 WHERE id = 1").run();
     });
     ensureToday();
-    execute("log_morning_checkin", { scaleWeightKg: 74.92, hrvMs: 72, rhrBpm: 53, sleepHours: 7.8, deepSleepPct: 22 }, "DEMO_SEED");
+    execute("log_morning_checkin", { scaleWeightKg: 74.92, hrvMs: 72, hrvMetric: "RMSSD", rhrBpm: 53, sleepHours: 7.8, deepSleepPct: 22 }, "DEMO_SEED");
     execute("log_meal_items", { mealSlot: "早餐", items: [{ foodId: "f4", weightGrams: 100 }, { foodId: "f6", weightGrams: 60 }] }, "DEMO_SEED");
   }
 
@@ -464,9 +508,34 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
         glycogenAfter(date, level), date);
   }
 
+  function recomputeWeightTrend() {
+    let smoothed = null;
+    let latest = null;
+    const rows = q("SELECT date, scale_weight_kg FROM daily_ledger WHERE scale_weight_kg IS NOT NULL AND date <= ? ORDER BY date").all(today());
+    for (const r of rows) {
+      smoothed = smoothed == null ? r.scale_weight_kg : EWMA_ALPHA*r.scale_weight_kg + (1-EWMA_ALPHA)*smoothed;
+      q("UPDATE daily_ledger SET dewatered_weight_kg = ?, ewma_weight_kg = ? WHERE date = ?")
+        .run(r.scale_weight_kg, round2(smoothed), r.date);
+      latest = r;
+    }
+    if (latest) q("UPDATE user_profile SET weight_kg = ?, ewma_weight_kg = ?, updated_at = ? WHERE id = 1")
+      .run(latest.scale_weight_kg, round2(smoothed), nowIso());
+  }
+
+  function ensureLedger(date) {
+    if (date > today()) throw new ToolError("不能写入未来业务日期");
+    if (getRow(date)) return;
+    const s = getSchedule()[weekdayIndex(date)];
+    const preset = CARB_PRESETS[s.plan];
+    q(`INSERT OR IGNORE INTO daily_ledger (date, carb_level, is_training_day, workout_focus, agent_advice, target_tdee, est_glycogen_g)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(date, s.plan, preset.isTrainingDay ? 1 : 0, s.focus, preset.advice,
+        Math.round(getProfile().adaptive_tdee * preset.tdeeFactor), GLYCOGEN_BASE_G);
+  }
+
   function recalcIntake(date) {
     const s = q("SELECT COALESCE(SUM(p),0) AS p, COALESCE(SUM(c),0) AS c, COALESCE(SUM(f),0) AS f FROM meal_logs WHERE date = ?").get(date);
-    q("UPDATE daily_ledger SET intake_kcal = ?, p_g = ?, c_g = ?, f_g = ? WHERE date = ?")
+    q("UPDATE daily_ledger SET intake_kcal = ?, p_g = ?, c_g = ?, f_g = ?, intake_complete = 0 WHERE date = ?")
       .run(kcalOf(s.p, s.c, s.f), round1(s.p), round1(s.c), round1(s.f), date);
   }
 
@@ -475,54 +544,76 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
       .run(nowIso(), source, toolName, JSON.stringify(payload), summary);
   }
 
-  // ---------- 动态 TDEE 校准 ----------
-  function computeCalibration(windowDays = 7) {
+  // ---------- 观察与 TDEE 校准 ----------
+  // Calendar based, never count a weigh-in as a calendar day. 7,700 kcal/kg is
+  // an approximate sensitivity model, NOT proof of metabolic adaptation.
+  function computeCalibration(windowDays = 14) {
     const profile = getProfile();
-    const rows = q("SELECT * FROM daily_ledger WHERE scale_weight_kg IS NOT NULL ORDER BY date DESC LIMIT ?")
-      .all(windowDays).reverse();
-    if (rows.length < 3) {
-      return { ok: false, reason: `有效空腹体重样本 ${rows.length} 天，不足 3 天，暂不校准` };
+    const lastWeight = q("SELECT * FROM daily_ledger WHERE scale_weight_kg IS NOT NULL AND date <= ? ORDER BY date DESC LIMIT 1").get(today());
+    if (!lastWeight) return { ok: false, reason: "没有实测体重记录" };
+    const lowerBound = offsetDateStr(lastWeight.date, -windowDays);
+    const weights = q(`SELECT * FROM daily_ledger WHERE date >= ? AND date <= ?
+      AND scale_weight_kg IS NOT NULL ORDER BY date`).all(lowerBound, lastWeight.date);
+    if (weights.length < 3) return { ok: false, reason: `窗口内仅 ${weights.length} 次称重，至少需要 3 次` };
+    const first = weights[0], last = weights[weights.length - 1];
+    const nDays = dayDiff(first.date, last.date);
+    if (nDays < 7) return { ok: false, reason: `实际跨度 ${nDays} 天，至少需要 7 天数据以减少短期噪声` };
+    const ledger = q("SELECT * FROM daily_ledger WHERE date >= ? AND date < ? ORDER BY date").all(first.date, last.date);
+    const byDate = new Map(ledger.map((r) => [r.date, r]));
+    const data = [];
+    for (let k = 0; k < nDays; k++) {
+      const date = offsetDateStr(first.date, k);
+      const row = byDate.get(date);
+      data.push({ date, row, complete: !!row?.intake_complete && Number.isFinite(row.intake_kcal) });
     }
-    const first = rows[0], last = rows[rows.length - 1];
-    const nDays = rows.length - 1;
-
-    // 最后一天的摄入尚未结束，不计入；没记饮食的天不能当作 0 摄入
-    let balance = 0, unlogged = 0;
-    for (const r of rows.slice(0, -1)) {
-      if (r.intake_kcal > 0) balance += r.intake_kcal - r.target_tdee;
-      else unlogged++;
-    }
-    if (unlogged > nDays / 2) {
-      return { ok: false, reason: `窗口内 ${unlogged}/${nDays} 天没有饮食记录，热量收支不可信，暂不校准` };
-    }
+    const unlogged = data.filter((x) => !x.complete).length;
+    const coverage = (nDays - unlogged) / nDays;
+    if (coverage < 0.9) return {
+      ok: false, reason: `窗口内 ${unlogged}/${nDays} 天未确认完整饮食记录，当前覆盖率 ${(coverage*100).toFixed(0)}%；至少需 90%`,
+      windowDays: nDays, unloggedDays: unlogged, coverage
+    };
+    // Never treat missing records as zero-intake or scale partial balances up silently.
+    if (unlogged > 0) return { ok: false, reason: `尚有 ${unlogged} 天未确认的摄入数据，继续补录后再计算`, windowDays: nDays, unloggedDays: unlogged, coverage };
+    const balance = data.reduce((sum, x) => sum + x.row.intake_kcal - x.row.target_tdee, 0);
     const expectedDeltaKg = round2(balance / KCAL_PER_KG);
-    const actualEwmaDeltaKg = round2(last.ewma_weight_kg - first.ewma_weight_kg);
+    // Linear weight trend uses all independent scale observations, including irregular dates.
+    // Do not anchor the change estimate to one noisy first/last weight or presumed glycogen pool.
+    const coords = weights.map((w) => ({ x: dayDiff(first.date, w.date), y: Number(w.scale_weight_kg) }));
+    const mx = coords.reduce((sum, v) => sum + v.x, 0) / coords.length;
+    const my = coords.reduce((sum, v) => sum + v.y, 0) / coords.length;
+    const denom = coords.reduce((sum, v) => sum + (v.x - mx) ** 2, 0);
+    const slope = coords.reduce((sum, v) => sum + (v.x - mx) * (v.y - my), 0) / denom;
+    const actualEwmaDeltaKg = round2(slope * nDays); // legacy API name; now a regression trend delta
+    const rss = coords.reduce((sum, v) => sum + (v.y - (my + slope * (v.x-mx)))**2, 0);
+    const slopeSe = coords.length > 2 ? Math.sqrt(rss / (coords.length - 2) / denom) : Infinity;
+    const weightNoiseThresholdKg = Math.max(0.20, 1.96 * slopeSe * nDays);
     const actualScaleDeltaKg = round2(last.scale_weight_kg - first.scale_weight_kg);
     const discrepancy = actualEwmaDeltaKg - expectedDeltaKg;
-    const loggedDays = nDays - unlogged;
-    const rawDriftKcal = Math.round(-(discrepancy * KCAL_PER_KG) / loggedDays);
-
-    const step = clamp(Math.round(rawDriftKcal * CAL_DAMPING), -CAL_MAX_STEP, CAL_MAX_STEP);
+    const rawDriftKcal = Math.round(-(discrepancy * KCAL_PER_KG) / nDays);
     const minSafe = Math.round(profile.formula_tdee * (1 - CAL_BOUND));
     const maxSafe = Math.round(profile.formula_tdee * (1 + CAL_BOUND));
+    // Small shifts may be measurement noise; no automatic 'metabolic damage' diagnosis.
+    const step = Math.abs(discrepancy) > weightNoiseThresholdKg
+      ? clamp(Math.round(rawDriftKcal * CAL_DAMPING), -CAL_MAX_STEP, CAL_MAX_STEP) : 0;
     const newTdee = clamp(profile.adaptive_tdee + step, minSafe, maxSafe);
     const appliedDeltaKcal = newTdee - profile.adaptive_tdee;
-
-    const gapNote = unlogged ? `（${unlogged} 天无饮食记录已排除）` : "";
-    const diagnosticNote = discrepancy > 0.08
-      ? `检测到代谢适应下调：过去 ${nDays} 天按热量收支应变化 ${expectedDeltaKg}kg，实际去水 EWMA 净重变化 ${actualEwmaDeltaKg}kg（空腹秤重变化 ${actualScaleDeltaKg}kg）${gapNote}。真实消耗比账面低约 ${Math.abs(rawDriftKcal)}kcal/d，阻尼后建议基准 TDEE ${appliedDeltaKcal}kcal。`
-      : discrepancy < -0.08
-      ? `检测到高代谢通量：实际去水净重下降快于预期 ${Math.abs(round2(discrepancy))}kg${gapNote}，真实消耗比账面高约 ${Math.abs(rawDriftKcal)}kcal/d，阻尼后建议基准 TDEE +${appliedDeltaKcal}kcal。`
-      : `代谢模型吻合：预测净重与实际去水 EWMA 偏差 ${discrepancy.toFixed(2)}kg${gapNote}，维持当前 TDEE。`;
-
+    const evidence = data.map((x) => [x.date, x.row.intake_kcal, x.row.target_tdee]);
+    const evidenceHash = createHash("sha256").update(JSON.stringify({ first:first.date, last:last.date,
+      weights:weights.map((r) => [r.date,r.scale_weight_kg]), evidence })).digest("hex");
+    const prior = q("SELECT id FROM tdee_calibrations WHERE evidence_hash = ? AND applied_delta_kcal != 0 LIMIT 1").get(evidenceHash);
+    const previous = q("SELECT last_observation_date FROM tdee_calibrations WHERE applied_delta_kcal != 0 ORDER BY id DESC LIMIT 1").get();
+    const reusedEvidence = !!prior;
+    const noNewObservation = previous?.last_observation_date && last.date <= previous.last_observation_date;
+    const diagnosticNote = `估计值（非代谢诊断）：${nDays} 日摄入覆盖 100%，能量收支对应 ${expectedDeltaKg} kg，实测体重回归趋势变化 ${actualEwmaDeltaKg} kg；差异 ${round2(discrepancy)} kg。可能来自体液、摄入误差、活动或模型简化。`;
     return {
-      ok: true, windowDays: nDays, unloggedDays: unlogged,
-      expectedDeltaKg, actualEwmaDeltaKg, actualScaleDeltaKg, rawDriftKcal,
-      appliedDeltaKcal: Math.abs(discrepancy) > 0.08 ? appliedDeltaKcal : 0,
+      ok: true, windowDays: nDays, weightSamples: weights.length, unloggedDays: 0, coverage: 1,
+      expectedDeltaKg, actualEwmaDeltaKg, actualTrendDeltaKg:actualEwmaDeltaKg, actualScaleDeltaKg, rawDriftKcal,
+      weightNoiseThresholdKg:round2(weightNoiseThresholdKg),
+      appliedDeltaKcal: (reusedEvidence || noNewObservation) ? 0 : appliedDeltaKcal,
       oldTdee: profile.adaptive_tdee,
-      newTdee: Math.abs(discrepancy) > 0.08 ? newTdee : profile.adaptive_tdee,
-      safeRange: [minSafe, maxSafe],
-      diagnosticNote
+      newTdee: (reusedEvidence || noNewObservation) ? profile.adaptive_tdee : newTdee,
+      reusedEvidence: !!(reusedEvidence || noNewObservation), evidenceHash,
+      lastObservationDate:last.date, safeRange: [minSafe, maxSafe], diagnosticNote
     };
   }
 
@@ -568,89 +659,79 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
       };
     },
 
-    log_morning_checkin(a) {
-      const t = today();
-      const p = getProfile();
-      const row = getRow(t);
-      const prev = getPrevRow(t);
-      const out = {};
+    log_morning_checkin(a, source = "MCP_AGENT") {
+      if (a.hrvMs != null && !a.hrvMetric) throw new ToolError("提供 hrvMs 时必须声明 hrvMetric: SDNN 或 RMSSD");
+      if (a.measuredAt && Date.parse(a.measuredAt) > now().getTime() + 5*60_000) throw new ToolError("测量时间不能位于未来");
+      const t = a.measuredAt ? localDateStr(new Date(a.measuredAt), timeZone) : today();
       const parts = [];
-
+      const out = { ledgerDate: t };
+      const key = a.sourceEventId ? source + ":" + a.sourceEventId : null;
       tx(() => {
-        if (a.scaleWeightKg != null) {
-          // 用昨天吃完后的糖原池估算今早的结合水
-          const shift = waterShiftKg(prev ? prev.est_glycogen_g : GLYCOGEN_BASE_G);
-          const dewatered = round2(a.scaleWeightKg - shift);
-          const prevEwmaRow = q("SELECT ewma_weight_kg FROM daily_ledger WHERE date < ? AND ewma_weight_kg IS NOT NULL ORDER BY date DESC LIMIT 1").get(t);
-          const prevEwma = prevEwmaRow?.ewma_weight_kg ?? p.ewma_weight_kg;
-          const ewma = prevEwma == null ? dewatered : round2(EWMA_ALPHA * dewatered + (1 - EWMA_ALPHA) * prevEwma);
-          q("UPDATE daily_ledger SET scale_weight_kg = ?, dewatered_weight_kg = ?, ewma_weight_kg = ? WHERE date = ?")
-            .run(a.scaleWeightKg, dewatered, ewma, t);
-          q("UPDATE user_profile SET weight_kg = ?, ewma_weight_kg = ?, updated_at = ? WHERE id = 1")
-            .run(a.scaleWeightKg, ewma, nowIso());
-          Object.assign(out, { scaleWeightKg: a.scaleWeightKg, waterShiftKg: round2(shift), dewateredWeightKg: dewatered, ewmaWeightKg: ewma });
-          parts.push(`秤重 ${a.scaleWeightKg}kg → 剥离糖原水 ${shift >= 0 ? "+" : ""}${round2(shift)}kg → 去水净重 ${dewatered}kg (EWMA ${ewma}kg)`);
+        if (key) {
+          const r = q("INSERT OR IGNORE INTO health_ingest_events (source, source_event_id, measured_at, received_at, ledger_date) VALUES (?, ?, ?, ?, ?)")
+            .run(source, a.sourceEventId, a.measuredAt ?? null, nowIso(), t);
+          if (!r.changes) { out.duplicate = true; return; }
         }
-
+        ensureLedger(t);
+        if (a.scaleWeightKg != null) {
+          q("UPDATE daily_ledger SET scale_weight_kg = ?, weight_measured_at = ? WHERE date = ?")
+            .run(a.scaleWeightKg, a.measuredAt ?? nowIso(), t);
+          recomputeWeightTrend();
+          const r = getRow(t);
+          Object.assign(out, { scaleWeightKg: a.scaleWeightKg, dewateredWeightKg: a.scaleWeightKg,
+            waterShiftKg: 0, ewmaWeightKg: r.ewma_weight_kg });
+          parts.push(`实测体重 ${a.scaleWeightKg}kg；原始体重 EWMA ${r.ewma_weight_kg}kg（未进行假设糖原扣水）`);
+        }
         const set = (col, v) => { if (v != null) q(`UPDATE daily_ledger SET ${col} = ? WHERE date = ?`).run(v, t); };
-        set("hrv_ms", a.hrvMs); set("rhr_bpm", a.rhrBpm); set("sleep_hours", a.sleepHours);
-        set("deep_sleep_pct", a.deepSleepPct); set("steps", a.steps); set("active_kcal", a.activeKcal);
-        if (a.steps != null || a.activeKcal != null) parts.push(`步数 ${a.steps ?? "-"} / 活动 ${a.activeKcal ?? "-"}kcal`);
-
-        // 只有恢复类指标变化时才重评 CNS，避免下午同步步数时把手动设定的档位又熔断掉
+        set("hrv_ms", a.hrvMs);set("hrv_metric",a.hrvMetric);
+        set("rhr_bpm", a.rhrBpm);set("sleep_hours", a.sleepHours);
+        set("deep_sleep_pct", a.deepSleepPct);set("steps", a.steps);set("active_kcal", a.activeKcal);
         if (a.hrvMs != null || a.rhrBpm != null || a.sleepHours != null) {
-          const cur = getRow(t);
-          if (cur.hrv_ms != null && cur.rhr_bpm != null && cur.sleep_hours != null) {
-            const r = readinessScore({ hrv: cur.hrv_ms, rhr: cur.rhr_bpm, sleep: cur.sleep_hours, hrvBaseline: p.hrv_baseline, rhrBaseline: p.rhr_baseline });
-            q("UPDATE daily_ledger SET readiness_score = ?, cns_status = ? WHERE date = ?").run(r.score, r.status, t);
-            out.readinessScore = r.score;
-            out.cnsStatus = r.status;
-            if (r.status === "OVERRIDE_REST") {
-              applyDayLevel(t, "low", {
-                isTrainingDay: false,
-                focus: "⚠️ CNS 疲劳熔断 · 强制低碳恢复日",
-                advice: `【生理遥测熔断】晨起 HRV ${cur.hrv_ms}ms / RHR ${cur.rhr_bpm}bpm / 睡眠 ${cur.sleep_hours}h，准备度仅 ${r.score}/100。今日已强制降级为低碳恢复日，练前氮泵与咖啡因自动静默；补充甘氨酸镁与鱼油，保证 8h 睡眠。`
-              });
-              parts.push(`准备度 ${r.score} → CNS 熔断，强制低碳恢复日`);
-            } else if (r.status === "CAUTION") {
-              q("UPDATE daily_ledger SET agent_advice = ? WHERE date = ?")
-                .run(`【轻度疲劳】晨起准备度 ${r.score}/100。保留${CARB_PRESETS[row.carb_level].label}配额，主项训练容量建议下调 15%，避免力竭组 (RPE ≤ 8.5)。`, t);
-              parts.push(`准备度 ${r.score} (CAUTION)`);
-            } else {
-              parts.push(`准备度 ${r.score} (OPTIMAL)`);
-            }
-          } else {
-            parts.push("恢复指标不全 (需 HRV+RHR+睡眠)，暂不评估准备度");
+          const r=getRow(t), p=getProfile();
+          if (r.hrv_ms != null && r.rhr_bpm != null && r.sleep_hours != null && r.hrv_metric === "RMSSD") {
+            // This is an unvalidated flag, NOT evidence to rewrite nutrition or prescribe supplements.
+            const x=readinessScore({ hrv:r.hrv_ms,rhr:r.rhr_bpm,sleep:r.sleep_hours,hrvBaseline:p.hrv_baseline,rhrBaseline:p.rhr_baseline });
+            q("UPDATE daily_ledger SET readiness_score = ?, cns_status = ? WHERE date = ?").run(x.score,x.status,t);
+            out.readinessScore=x.score;out.cnsStatus=x.status;
+            parts.push(`恢复参考指数 ${x.score}/100 (${x.status})；需人工评估，未自动变更饮食或训练`);
+          } else if (r.hrv_ms != null && r.hrv_metric === "SDNN") {
+            q("UPDATE daily_ledger SET readiness_score = NULL, cns_status = NULL WHERE date = ?").run(t);
+            parts.push("SDNN 与当前 RMSSD 基线不可直接比较，恢复指数未计算");
           }
         }
       });
-      out.carbLevel = getRow(t).carb_level;
-      return { result: out, summary: parts.length ? parts.join("；") : "晨起打卡：无有效字段" };
+      if (out.duplicate) return { result:{ok:true,duplicate:true,ledgerDate:t},summary:null };
+      out.carbLevel=getRow(t).carb_level;
+      return { result:out,summary:parts.join("；") || "健康数据已记录" };
     },
 
     calibrate_metabolic_tdee(a) {
-      const t = today();
-      const done = q("SELECT COUNT(*) AS n FROM tdee_calibrations WHERE calibrated_date = ? AND applied_delta_kcal != 0").get(t).n;
-      if (done && !a.force) {
-        throw new ToolError("今天已经校准过一次（同一窗口重复执行会叠加修正）。确需再执行请传 force=true。");
-      }
-      const cal = computeCalibration(a.windowDays ?? 7);
-      if (!cal.ok) return { result: cal, summary: `TDEE 校准跳过：${cal.reason}` };
+      const cal = computeCalibration(a.windowDays ?? 14);
+      if (!cal.ok) return { result: cal, summary: `TDEE 暂不调整：${cal.reason}` };
+      if (!a.apply) return { result: { ...cal, previewOnly: true }, summary: null };
+      if (cal.reusedEvidence) return { result: { ...cal, appliedDeltaKcal:0, reason:"没有新增独立的称重证据；禁止重复校准" }, summary: null };
       tx(() => {
         if (cal.appliedDeltaKcal !== 0) {
           q("UPDATE user_profile SET adaptive_tdee = ?, updated_at = ? WHERE id = 1").run(cal.newTdee, nowIso());
-          const row = getRow(t);
+          const row = getRow(today());
           q("UPDATE daily_ledger SET target_tdee = ? WHERE date = ?")
-            .run(Math.round(cal.newTdee * CARB_PRESETS[row.carb_level].tdeeFactor), t);
+            .run(Math.round(cal.newTdee * CARB_PRESETS[row.carb_level].tdeeFactor), today());
         }
         q(`INSERT INTO tdee_calibrations (calibrated_at, calibrated_date, window_days, expected_delta_kg, actual_ewma_delta_kg,
-             raw_drift_kcal, applied_delta_kcal, old_tdee, new_tdee, diagnostic_note)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(nowIso(), t, cal.windowDays, cal.expectedDeltaKg, cal.actualEwmaDeltaKg, cal.rawDriftKcal,
-            cal.appliedDeltaKcal, cal.oldTdee, cal.newTdee, cal.diagnosticNote);
+             raw_drift_kcal, applied_delta_kcal, old_tdee, new_tdee, diagnostic_note, evidence_hash, last_observation_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(nowIso(), today(),cal.windowDays,
+          cal.expectedDeltaKg,cal.actualEwmaDeltaKg,cal.rawDriftKcal,cal.appliedDeltaKcal,cal.oldTdee,
+          cal.newTdee,cal.diagnosticNote,cal.evidenceHash,cal.lastObservationDate);
       });
-      const d = cal.appliedDeltaKcal;
-      return { result: cal, summary: `TDEE 校准：${cal.oldTdee} → ${cal.newTdee} kcal (${d >= 0 ? "+" : ""}${d})` };
+      return { result:cal, summary:`TDEE 人工确认估计更新：${cal.oldTdee} → ${cal.newTdee} kcal` };
+    },
+
+    mark_intake_complete(a) {
+      const date = a.date ?? today();
+      if (date > today()) throw new ToolError("未来日期不能标记完整");
+      ensureLedger(date);
+      q("UPDATE daily_ledger SET intake_complete = ? WHERE date = ?").run(a.complete?1:0,date);
+      return { result:{ok:true,date,complete:a.complete},summary:`${date} 日饮食记录标记为${a.complete?"完整":"未完成"}` };
     },
 
     set_day_context(a) {
@@ -698,13 +779,14 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
         if (!it.name || it.p == null || it.c == null || it.f == null) {
           throw new ToolError("没有 foodId 的条目必须给 name、p、c、f");
         }
+        if (it.p + it.c + it.f > it.weightGrams * 1.001) throw new ToolError("该食物的营养素总质量不能超过录入克重");
         return { name: it.name, w: it.weightGrams, p: it.p, c: it.c, f: it.f };
       });
       const ids = [];
       tx(() => {
         const ins = q("INSERT INTO meal_logs (id, date, slot, name, weight_g, p, c, f, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
         for (const r of resolved) {
-          const id = "m_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+          const id = "m_" + randomUUID();
           ins.run(id, t, a.mealSlot, r.name, r.w, r.p, r.c, r.f, nowIso());
           ids.push(id);
         }
@@ -728,7 +810,8 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
     },
 
     add_food_to_library(a) {
-      const id = "custom_" + Date.now().toString(36);
+      if (a.p + a.c + a.f > 100.01) throw new ToolError("每 100g 食物的蛋白质、碳水和脂肪合计不能大于 100g");
+      const id = "custom_" + randomUUID();
       q("INSERT INTO foods (id, name, p, c, f, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, a.name, a.p, a.c, a.f, nowIso());
       return { result: { ok: true, foodId: id }, summary: `食材库新增：${a.name} (每100g P${a.p} C${a.c} F${a.f})` };
     },
@@ -750,11 +833,12 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
     const profile = getProfile();
     const row = getRow(t);
     const bw = bodyWeight(profile);
-    const macro = currentPlan();
-    const targets = macro.forLevel(row.carb_level);
-
     const schedule = getSchedule();
     const ti = weekdayIndex(t);
+    const effectiveWeek = schedule.map((s, i) => i === ti ? row.carb_level : s.plan);
+    const macro = macroPlan({ adaptiveTdee:profile.adaptive_tdee, goalKcal:profile.goal_kcal,
+      ratioP:profile.ratio_p,ratioC:profile.ratio_c,ratioF:profile.ratio_f }, effectiveWeek);
+    const targets = macro.forLevel(row.carb_level);
 
     // 滚动 7 天预测：今天用账本档位，之后按周模板
     const prev = getPrevRow(t);
@@ -789,11 +873,16 @@ export function createEngine(dbPath, { demo = false, now = () => new Date() } = 
     const journals = q("SELECT * FROM mcp_event_journal ORDER BY id DESC LIMIT 12").all();
 
     return {
-      demo, date: t, todayIndex: ti,
+      demo, date: t, todayIndex: ti, timeZone,
+      nutritionWarnings: (() => {
+        const proteinPerKg = targets.p / Math.max(1,bw);
+        return proteinPerKg < 1.2 ? [`蛋白质计划约 ${proteinPerKg.toFixed(2)}g/kg；对训练者可能偏低，请根据个人需要核对目标`] : [];
+      })(),
       profile: { ...profile, bmr: mifflinBmr({ ...profile, weightKg: bw }), body_weight_kg: bw },
       today: { ...row, label: CARB_PRESETS[row.carb_level].label },
       targets,
       weeklyBase: macro.base,
+      effectiveWeekTargets: effectiveWeek.map((lv, i) => ({ dayIndex:i, plan:lv, ...macro.forLevel(lv) })),
       history: q("SELECT * FROM (SELECT * FROM daily_ledger ORDER BY date DESC LIMIT 14) ORDER BY date ASC").all(),
       calibrationPreview: computeCalibration(7),
       calibrationHistory: q("SELECT * FROM tdee_calibrations ORDER BY id DESC LIMIT 5").all(),

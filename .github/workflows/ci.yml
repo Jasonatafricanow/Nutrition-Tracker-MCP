@@ -10,8 +10,9 @@ jobs:
     strategy:
       matrix:
         node-version: ['22', '24']
+        timezone: ['UTC', 'Asia/Shanghai', 'Europe/London']
     env:
-      TZ: Asia/Shanghai
+      TZ: ${{ matrix.timezone }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
