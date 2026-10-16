@@ -2,7 +2,7 @@
 
 # Nutrition Tracker MCP
 
-**A local-first nutrition dashboard with an MCP interface and a feedback-driven calorie model.**
+**An agent-first nutrition MCP server with persistent food logging, reusable meals, and an optional monitoring dashboard.**
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-303633?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/) [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-stdio-303633?style=flat-square)](https://modelcontextprotocol.io/) ![Storage](https://img.shields.io/badge/SQLite-local--first-303633?style=flat-square) ![Status](https://img.shields.io/badge/status-portfolio%20prototype-B53A27?style=flat-square)
 
@@ -12,9 +12,34 @@
 
 ---
 
-This is a **personal engineering portfolio project**, not a hosted service. It explores how an AI assistant can interact with a deterministic, persistent nutrition engine without outsourcing numerical calculations or state management to the language model.
+This is a **personal engineering portfolio project built primarily as an MCP module for AI agents**, not a hosted service. Users communicate with an Agent; the Agent resolves intent, asks for missing portions or food preparation details, and calls deterministic, validated tools. The dashboard is **secondary**: it monitors and reviews persisted state rather than replacing the Agent workflow.
 
 The application brings together daily food logging, weekly carb cycling, optional recovery signals, a weight-trend model, and conservative TDEE recalibration. An MCP client, browser dashboard, and phone webhook all read and write through **the same SQLite-backed engine**.
+
+## v5.2 experimental: Agent-first quick logging
+
+**Experimental branch:** `experiment/agent-first-quick-log` (not merged into main). Agent/MCP is the primary interaction surface; the Dashboard remains optional.
+
+| New/extended MCP tool | Use |
+| --- | --- |
+| `get_agent_context` | Compact daily targets, intake, remaining macro budget, recent meals, and template names |
+| `search_foods` | Keyword search by food name and nutrient values per 100g; no full snapshot required |
+| `get_meal_history` | Read previous meals on a specific calendar date |
+| `log_meal_items` (extended) | Log a confirmed meal for today or a past date; optional `requestId` prevents duplicate writes during Agent retries |
+| `save_meal_template` | Snapshot a meal from a real logged date and meal slot |
+| `list_meal_templates` | Find reusable meal templates with recorded portions and macros |
+| `log_meal_template` | Reuse a saved meal with an optional portion multiplier and idempotency key |
+| `export_nutrition_data` | Export at most 90 calendar days of ledger and meal history as JSON |
+
+**Example Agent interaction:** “I ate 200g chicken breast and 150g cooked rice for lunch. Save that as my usual office lunch.” The Agent should search ingredients, **confirm raw/cooked status and actual measured quantities**, then invoke `log_meal_items` followed by `save_meal_template`. Future repeats use `list_meal_templates` and `log_meal_template`.
+
+```json
+{"tool":"log_meal_items","args":{"mealSlot":"午餐","items":[{"foodId":"f1","weightGrams":200},{"foodId":"f7","weightGrams":150}],"requestId":"single-confirmed-action-123"}}
+```
+
+**Boundaries:** no embedded LLM, no autonomous food guessing, no photo recognition, no external food search, no automatic intake completion. Editing historical meals invalidates their daily completion flag. `requestId` must be unique per confirmed write and **stable across its retries**. Templates freeze previously recorded macros and never silently change when food-library values change. The v5.1 TDEE confirmation requirement remains.
+
+See [Agent workflow reference](docs/AGENT_WORKFLOWS.md).
 
 ## Interface preview
 
@@ -32,7 +57,7 @@ The visual direction is an **editorial training journal**: warm paper, ink-like 
 | **02** | Diet and supplement ledger | Meal portions, food library, daily totals, supplement check-ins, local persistence |
 | **03** | Recovery inputs | Optional HRV, resting heart rate, sleep, activity, and weight check-ins |
 | **04** | Adaptive TDEE | Weight-trend comparison, bounded corrections, calibration diagnostics |
-| **05** | MCP-native controls | 11 tools and one read-only snapshot resource for an AI agent |
+| **05** | MCP-native controls | 18 tools and one read-only snapshot resource for an AI agent |
 | **06** | Live observability | HTTP dashboard, SSE updates, SQLite WAL and cross-process change detection |
 
 ## v5.1 correctness and safety changes
@@ -121,6 +146,8 @@ Nutrition-Tracker-MCP/
 
 ## MCP integration
 
+**Primary interface:** connect the local stdio MCP server to your AI Agent. No dashboard interaction is required for logging, templates, history or export.
+
 Use this server as a local **stdio MCP** process. The path must point to your own checkout:
 
 ```json
@@ -138,14 +165,21 @@ For Windows, use a path such as `C:/projects/Nutrition-Tracker-MCP/server.js`. E
 
 | Tool | Purpose |
 | --- | --- |
-| `get_snapshot` | Read the current dashboard state, targets, history and diagnostics |
+| `get_agent_context` | Compact Agent-oriented daily state, without the large snapshot |
+| `get_snapshot` | Read the full state, targets, history and diagnostics |
 | `set_profile` | Update body parameters, activity factor, target and macro ratios |
 | `log_morning_checkin` | Record weight, HRV, RHR, sleep and optional activity metrics |
 | `calibrate_metabolic_tdee` | Preview the TDEE estimate; optionally apply with explicit approval |
 | `mark_intake_complete` | Confirm or reopen a specific day’s intake log |
 | `set_day_context` | Override today's carb level and training context |
 | `update_weekly_schedule` | Modify individual days or the weekly template |
-| `log_meal_items` | Log portions from the food library or explicit macros |
+| `log_meal_items` | Log meals today or historically; optional retry-safe requestId |
+| `search_foods` | Discover foods by name and per-100g macros |
+| `get_meal_history` | Inspect meals for one selected day |
+| `save_meal_template` | Save a logged meal as a nutritional snapshot |
+| `list_meal_templates` | Find existing meal templates |
+| `log_meal_template` | Record a scaled meal template into the ledger |
+| `export_nutrition_data` | Export up to 90 days of ledger and meals as JSON |
 | `delete_meal_item` | Remove a logged meal item |
 | `add_food_to_library` | Extend the editable food library |
 | `update_supplement_stack` | Mark today's supplement entry and dose text |
@@ -196,6 +230,6 @@ The optional webhook accepts `weightKg` / `scaleWeightKg`, `hrvMs`, `hrvMetric`,
 
 ### Project status
 
-This repository is maintained as a **portfolio case study and experimental prototype**. It demonstrates end-to-end integration and design choices, not production hardening. The suite includes 32 engine and HTTP regression tests plus a synthetic-noise comparison (`node audit/compare-montecarlo.mjs`, requires the v5.0 historical commit in a full Git clone). These are not a substitute for longitudinal human validation, professional security review or clinical evidence.
+This repository is maintained as a **portfolio case study and experimental prototype**. It demonstrates end-to-end integration and design choices, not production hardening. The suite includes engine, agent-first and HTTP regression tests plus a synthetic-noise comparison (`node audit/compare-montecarlo.mjs`, requires the v5.0 historical commit in a full Git clone). These are not a substitute for longitudinal human validation, professional security review or clinical evidence.
 
 The source is publicly visible. **No open-source license has been selected yet**; visibility alone does not grant reuse rights.

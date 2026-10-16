@@ -1,4 +1,4 @@
-// Nutrition Tracker MCP v5：同一进程里同时提供
+// Nutrition Tracker MCP v5.2 experimental：同一进程里同时提供
 //   - stdio MCP 工具（给 Claude Desktop / Claude Code 等 Agent 调用）
 //   - HTTP 观察窗 + SSE 实时推送 + 手机健康 Webhook
 // 多个进程共用同一个 SQLite 文件时，靠 PRAGMA data_version 轮询感知别的进程的写入。
@@ -141,7 +141,7 @@ setInterval(() => {
 
 // ==================== MCP ====================
 if (USE_STDIO) {
-  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.1.0" });
+  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.2.0-alpha.1" });
 
   for (const [name, def] of Object.entries(TOOL_DEFS)) {
     mcp.registerTool(name, { description: def.description, inputSchema: def.shape }, async (args) => {
