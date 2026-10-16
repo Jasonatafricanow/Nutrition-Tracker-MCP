@@ -1,0 +1,20 @@
+{
+  "name": "nutrition-tracker-mcp",
+  "version": "5.0.0",
+  "private": true,
+  "description": "碳水循环 + 动态 TDEE 校准的 MCP 服务端与观察窗",
+  "type": "module",
+  "main": "server.js",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node server.js --demo",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "zod": "^3.25.0"
+  }
+}
