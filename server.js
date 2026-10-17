@@ -219,7 +219,20 @@ function createMcpServer() {
       inputSchema:{
         memberId:z.string().optional().describe('Required for writes to a household member; no individual credentials'),
         operation:z.enum(['meal','quick_meal','checkin','health_observation','correction','recent_correction','photo_stage','photo_confirm','photo_discard','template_save','template_log','supplement','plan','profile','intake_complete','food_add','acknowledge','advanced']),
-        args:z.record(z.unknown()).default({}).describe('Validated by existing engine; photo estimates use nutrition.photo_estimate.v1 via MCP prompt'),
+        args:z.object({
+          mealSlot:z.string().optional(),source:z.enum(['text']).optional(),
+          requestId:z.string().min(1).optional(),date:z.string().optional(),
+          foodName:z.string().optional(),weightGrams:z.number().positive().optional(),
+          mealId:z.string().optional(),expectedRevision:z.number().int().min(0).optional(),
+          items:z.array(z.object({name:z.string().optional(),foodId:z.string().optional(),
+            weightGrams:z.number().positive(),p:z.number().min(0).optional(),
+            c:z.number().min(0).optional(),f:z.number().min(0).optional()}).passthrough()).optional(),
+          sleepHours:z.number().min(0).max(24).optional(),rhrBpm:z.number().positive().optional(),
+          hrvMs:z.number().positive().optional(),measuredAt:z.string().optional(),
+          sourceEventId:z.string().optional(),kind:z.string().optional(),
+          systolic:z.number().optional(),diastolic:z.number().optional(),
+          value:z.number().optional(),note:z.string().optional(),
+        }).passthrough().default({}).describe('Typed frequent meal/correction/checkin fields; rare photo and advanced fields pass through to the unchanged engine-specific validator'),
         tool:z.string().optional().describe('Only with operation=advanced; exact underlying engine mutation name'),
         includeContext:z.boolean().default(true).describe('For meal/checkin/health/correction, include brief updated state so no follow-up query is needed')
       }
