@@ -59,6 +59,19 @@ test('remote family MCP isolates ledgers and limits sharing by caller identity',
   assert.equal(shared.error,false);assert.equal(shared.data.memberId,'bob');
   assert.equal((await result(b,'set_family_sharing',{granteeId:'alice',scope:'overview',enabled:false})).error,false);
   assert.equal((await result(a,'get_family_overview',{memberId:'bob'})).error,true);
+  const prompts=await b.listPrompts();assert.ok(prompts.prompts.some(x=>x.name==='family_wellness_workflow'));
+  const bp=await result(b,'log_health_observation',{kind:'blood_pressure',observedAt:'2026-10-17T09:00:00Z',systolic:122,diastolic:79,sourceEventId:'bob-bp-1'});
+  assert.equal(bp.error,false);
+  const note=await result(b,'log_health_observation',{kind:'symptom_note',observedAt:'2026-10-17T09:30:00Z',note:'private sensitive note'});
+  assert.equal(note.error,false);
+  assert.equal((await result(a,'get_family_health_report',{memberId:'bob',days:14})).error,true);
+  assert.equal((await result(b,'set_family_sharing',{granteeId:'alice',scope:'health_trends',enabled:true})).error,false);
+  const health=await result(a,'get_family_health_report',{memberId:'bob',days:14});
+  assert.equal(health.error,false);assert.equal(health.data.dataQuality.notesExcluded,true);
+  assert.ok(!JSON.stringify(health.data).includes('private sensitive note'));
+  const mine=await result(a,'get_my_health_history',{days:30});assert.equal(mine.data.observations.length,0);
+  assert.equal((await result(b,'set_family_sharing',{granteeId:'alice',scope:'health_trends',enabled:false})).error,false);
+  assert.equal((await result(a,'get_family_health_report',{memberId:'bob',days:14})).error,true);
   const blank=await result(b,'export_nutrition_data',{fromDate:'2026-10-01',toDate:'2026-10-18'});
   assert.equal(blank.error,false);assert.equal(blank.data.meals.length,0);
  }finally{if(a)await a.close().catch(()=>{});if(b)await b.close().catch(()=>{});await s.close();}

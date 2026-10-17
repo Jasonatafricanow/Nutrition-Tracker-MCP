@@ -120,6 +120,10 @@ Tokens must be kept private; do not commit them to Git. The local browser dashbo
 
 **Migration notes:** older databases are migrated in-place by adding columns. Previous weight EWMA values and historical intake records are **not certified as complete**. Reconfirm logs before calibration; retain a backup of your SQLite file. The deprecated `dewatered_weight_kg` column now mirrors scale weight for newly processed readings. Earlier historical values are not bulk overwritten unless weight trends are recomputed.
 
+## Family wellness observations (experimental)
+
+Additional member-scoped MCP tools record user-supplied blood pressure, temperature, glucose and private notes, and provide limited, separately consented observational trends. General wellness is the default; athletic performance is opt-in. No diagnostic health score or medical treatment advice. See [家庭健康记录与 Agent 解读](docs/FAMILY_WELLNESS_ZH.md).
+
 ## Family multi-user remote MCP (experimental)
 
 Enable `FAMILY_REGISTRY_PATH` and `FAMILY_DATA_DIR` to bind each remote token to a physically separate SQLite ledger. Sharing defaults to denied; members may grant or revoke limited `overview` and `health_trends` scopes individually. See [家庭多用户部署手册](docs/FAMILY_USERS_ZH.md) and [compose.family.yml](compose.family.yml). The local Dashboard is not a family member login UI.
