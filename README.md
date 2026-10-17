@@ -2,7 +2,7 @@
 
 # Nutrition Tracker MCP
 
-**An agent-first nutrition MCP server with quick, traceable meal logging, reusable meals, and an optional review-and-correction dashboard.**
+**A self-hosted, Agent-first nutrition and everyday health tracker for trusted family NAS deployments. Designed around low-friction recording, traceable estimates and correction—not a multi-tenant wellness SaaS.**
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-303633?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/) [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-stdio-303633?style=flat-square)](https://modelcontextprotocol.io/) ![Storage](https://img.shields.io/badge/SQLite-local--first-303633?style=flat-square) ![Status](https://img.shields.io/badge/status-portfolio%20prototype-B53A27?style=flat-square)
 
@@ -12,9 +12,29 @@
 
 ---
 
+## Portfolio overview
+
+**Problem:** for a person forming a health-management habit, a perfect nutritional record often costs more time than it returns. An Agent that asks several rounds of grams, recipes and portion questions may be *less* convenient than a mobile app.
+
+**Product choice:** professional nutrition, recovery and TDEE tools are visible first, providing a credible starting environment, but users can voluntarily switch to a simpler everyday dashboard without losing data or analytical capabilities. Text meals can be recorded as attributed estimates in one user turn. For a photo, the vision-capable Agent first reports the recognized food **identities and approximate portions**, gets **one combined approval**, and only then commits. The same meal can be corrected later through chat or the dashboard with preserved revision history.
+
+**Architecture choice:** a private family NAS is a *trust boundary*, not a miniature hosted SaaS. An authenticated remote Streamable HTTP MCP protects entry; member IDs distinguish whose records belong to whom. We deliberately rolled back per-member tokens and fine-grained sharing approvals because they impeded natural household Agent collaboration. This trades away *within-household confidentiality* and is only suitable for households consenting to that shared deployment.
+
+| Inspectable capability | Important implementation boundary |
+| --- | --- |
+| Two default tools: `nutrition_query` and `nutrition_execute` | Deterministic SQLite engine, typed frequent inputs, request deduplication and correction audit; legacy tools opt-in |
+| Estimated text/photo intake, saved meals, recent-meal correction | Photos interpreted by an external vision Agent and never stored on the NAS; no silent photo commits |
+| Family health overview, bounded device-data batch import, 7/30-day summaries | Shared household context with measurement timestamps; missing days do not mean zero |
+| Open Food Facts barcode and optional USDA references | External candidates are attributed and not auto-imported as verified local foods |
+| Professional-first, reversible everyday dashboard | For self-observation, not diagnosis or clinical advice |
+
+**Evidence:** [main CI: 118/118 tests, six Node.js/time-zone jobs at `343f4bf`](https://github.com/Jasonatafricanow/Nutrition-Tracker-MCP/actions/runs/39076144670). **Not yet verified:** deployment on the target NAS/Tailscale/Hermes stack, real-world vision-identification error rates, Agent turn counts and token/call savings. The screenshot below is a demo, not actual family data.
+
+**Decision records:** [why the household permission model was intentionally simplified](docs/PROJECT_RECORD_ZH.md) · [why approximate recording is a pragmatic product decision](docs/PRODUCT_STRATEGY_AGENT_FIRST_ZH.md) · [family NAS deployment guide](docs/HOUSEHOLD_LIGHTWEIGHT_ZH.md).
+
 ## Product direction: easy to record, easy to correct
 
-**Default user: an ordinary person developing a healthy habit, not a competitive athlete or a clinical patient.** Aim for one conversational turn to log a meal or daily observation. Agent estimates are acceptable when clearly labeled; save provenance and make corrections easy in chat and the Dashboard. Advanced carb cycling/TDEE remains opt-in, not an onboarding hurdle. The strict photo-review flow remains available, but should not be compulsory for casual records.
+**Intended users are people developing a sustainable health habit, not clinical patients or competitive athletes.** Professional capabilities are visible initially but never mandatory for everyday entries. Text estimates can be saved in one user turn, while photo estimates require one compact overall approval. The goal is fewer interactions with good provenance and easy corrections—not false precision.
 
 **[产品转向决策记录：为什么主动容忍合理误差](docs/PRODUCT_STRATEGY_AGENT_FIRST_ZH.md)** — documents the tradeoff between single-entry accuracy, user effort, continuity, traceability, correction, and real Agent evaluation.
 
@@ -26,7 +46,7 @@ The Dashboard initially exposes existing professional nutrition, recovery and tr
 
 The existing private `POST /api/health-webhook` accepts a single payload as before, or a bounded 1–30 event batch: `{memberId:"alex",events:[{measuredAt:"...",sourceEventId:"stable-device-event-id",sleepHours:6.5}]}`. Each event is separately deduplicated and returns its own status, with HTTP 207 for partial failures. Household batches require a valid member ID and never silently fall back to the legacy single-person ledger. No device account infrastructure is introduced. Default MCP write tool stays one `nutrition_execute`, with typed high-frequency nested arguments; rare actions pass through to existing engine validation.
 
-## Next iteration: fast correction, family meals and brief feedback
+## Implemented everyday workflows: correction, meals and feedback
 
 - **Fix the last meal without IDs:** `nutrition_execute({operation:"recent_correction",memberId:"alex",args:{foodName:"米饭",weightGrams:220,requestId:"fix-once"}})` finds an unambiguous recent item, updates it with versioned audit, and refuses ambiguous names.
 - **Reuse existing family meals:** save a regularly eaten meal with `template_save`; query all household members' saved templates using `nutrition_query({view:"family_recipes",query:"鸡肉"})` for portions and shared dinner planning. This reuses existing records and does **not** add an inventory subsystem.
@@ -35,7 +55,7 @@ The existing private `POST /api/health-webhook` accepts a single payload as befo
 
 The feature set stays within two default MCP tools; real Agent call traces and NAS deployment are still to be validated. Open Food Facts uses ODbL terms: [API docs](https://openfoodfacts.github.io/documentation/docs/Product-Opener/api/) · [license/reuse terms](https://support.openfoodfacts.org/help/en-gb/12-api-data-reuse/94-are-there-conditions-to-use-the-api).
 
-## Current development: lightweight family NAS + compact Agent MCP
+## Household NAS architecture and compact Agent MCP
 
 The current `main` implementation rebuilds household features **from the pre-family v5.3 baseline**. The household is the trusted boundary; member IDs label data, not accounts. No family SaaS login, per-member Bearer tokens or repeated sharing consent flows. Two default MCP tools replace the exposed dozens of low-level operations; the existing nutrition engine remains authoritative. Full legacy tools are available only with `MCP_TOOL_SURFACE=full` for migration.
 
@@ -55,15 +75,15 @@ The compact tool catalog reduces repeated model tool-selection context, but real
 
 ---
 
-This is a **personal engineering portfolio project** built as an **MCP tool module for AI agents**. Agents are the primary interface: users describe food, portion sizes, routines or corrections in conversation; the agent discovers foods, asks for missing evidence, and writes verified records through deterministic tools. The browser dashboard is secondary: it is for observation and review, not the primary workflow.
+This is a **personal engineering portfolio project** built as an **MCP tool module for AI agents**. The Agent handles estimates, clarification when it materially matters, and conversational corrections; the deterministic engine controls persistence and audit. The optional browser dashboard supports observation and manual calibration.
 
-The application brings together daily food logging, weekly carb cycling, optional recovery signals, a weight-trend model, and conservative TDEE recalibration. An MCP client, browser dashboard, and phone webhook all read and write through **the same SQLite-backed engine**.
+The application brings together daily food logging, weekly carb cycling, optional recovery signals, a weight-trend model, and conservative TDEE recalibration. MCP clients, the browser dashboard and phone webhooks reuse **the same deterministic SQLite-backed engine**, with separate member ledgers and a lightweight household context when family mode is enabled.
 
-## v5.2 experiment: agent-first meal logging and photo estimate compilation
+## Historical implementation notes: v5.2 meal and photo compiler
 
 The central deliverable is a **compiled, schema-validated photo estimate**, not a generic image caption. It separates observed evidence, inferred food identity, edible mass ranges, unknowns and questions before the Agent performs local food-library matching. A photograph alone never creates a measured food weight.
 
-> The historical feature notes below describe the underlying engine. In this development branch, the default Agent interface is the two-tool compact surface documented above.
+> **Historical lower-level API notes.** This section documents the earlier v5.2 engine/legacy tool catalog; the current main defaults to the two-tool interface above. It is not the current casual-text entry UX. Photo estimates still require one user approval.
 
 MCP is the product interface. These features require **no dashboard UI**:
 
@@ -101,7 +121,7 @@ Once the ledger contains that meal, the agent may call `save_meal_template` with
 - `requestId` should be stable across **retries of one user-confirmed write**, but different for a new meal even if identical. Reusing it with different arguments is an error.
 - Backfilling or replaying meals reopens the day's `intake_complete` flag; TDEE calibration stays opt-in as in v5.1.
 - Database migration adds template and request-receipt tables without rewriting existing meal records. New templates are stored as immutable nutritional snapshots.
-- No **native** food photo recognition, embedded LLM, barcode lookup, autonomous dietary advice, or cloud sync has been added. The validated, bounded estimate is supplied by an **external** vision Agent; no silent photo-to-ledger commits.
+- The MCP server does not run its own vision model or store photos. **Read-only barcode lookup was added later** through Open Food Facts; its results are not verified local food IDs. There is no autonomous medical advice, clinical diagnosis, or cloud sync service. Photo entries require a user approval.
 
 See [Agent workflow reference](docs/AGENT_WORKFLOWS.md) for structured calls and the trust boundary.
 
@@ -209,9 +229,13 @@ flowchart TB
 ```text
 Nutrition-Tracker-MCP/
 ├── engine.js                   # Nutrition model, tools, SQLite ledger
-├── agent-workflow.js           # Canonical host-independent agent routing Prompt
+├── agent-workflow.js           # Host-independent agent routing Prompt
+├── agent-interface.js          # Two-tool compact MCP surface
+├── household.js                # Family context and member attribution
+├── health-summary.js           # 7/30-day observation summaries
+├── open-food-facts.js          # Read-only barcode reference adapter
 ├── usda-foods.js               # Optional read-only external food reference adapter
-├── server.js                   # stdio MCP + HTTP API + SSE
+├── server.js                   # stdio/remote MCP, HTTP API, webhook, SSE
 ├── viewport.html               # Standalone responsive dashboard
 ├── test/engine.test.js         # Node built-in test runner
 ├── assets/dashboard-preview.jpg
@@ -223,7 +247,7 @@ Nutrition-Tracker-MCP/
 
 ## Remote MCP (optional)
 
-The experimental branch adds **authenticated Streamable HTTP MCP** on a separate `MCP_HTTP_PORT` (default 3457), while retaining local stdio and keeping Dashboard HTTP private. Remote MCP is **disabled by default**. It requires `MCP_HTTP_ENABLED=1`, a strong `MCP_HTTP_TOKEN`, TLS reverse proxy for off-machine access, and strict Host/Origin allowlists. No OAuth or multi-user isolation is provided. **See the [Chinese remote MCP / NAS deployment guide](docs/REMOTE_MCP_DEPLOYMENT_ZH.md)** for Docker Compose, Caddy, credentials, and Agent connection settings.
+The main branch includes **authenticated Streamable HTTP MCP** on a separate `MCP_HTTP_PORT` (default 3457), while retaining local stdio and keeping Dashboard HTTP private. Remote MCP is **disabled by default**. It requires `MCP_HTTP_ENABLED=1`, a strong `MCP_HTTP_TOKEN`, TLS reverse proxy for off-machine access, and strict Host/Origin allowlists. No OAuth or multi-user isolation is provided. **See the [Chinese remote MCP / NAS deployment guide](docs/REMOTE_MCP_DEPLOYMENT_ZH.md)** for Docker Compose, Caddy, credentials, and Agent connection settings.
 
 ## MCP integration
 
