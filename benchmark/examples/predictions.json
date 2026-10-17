@@ -1,0 +1,162 @@
+{
+  "schemaVersion": "nutrition.photo_benchmark.v1",
+  "run": {
+    "modelId": "SYNTHETIC_NOT_A_VISION_MODEL",
+    "promptSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "referencesHiddenFromAgent": true
+  },
+  "cases": [
+    {
+      "caseId": "synthetic-rice-chicken",
+      "estimate": {
+        "schemaVersion": "nutrition.photo_estimate.v1",
+        "imageAssessment": {
+          "view": "oblique",
+          "scaleReference": "none",
+          "limitations": [
+            "No physical image exists in this synthetic example"
+          ]
+        },
+        "items": [
+          {
+            "id": "item-1",
+            "predictedName": "rice",
+            "foodState": "cooked",
+            "identificationConfidence": "medium",
+            "visibleEvidence": [
+              "Illustrative appearance only; no actual image provided"
+            ],
+            "alternativeNames": [],
+            "ediblePortion": {
+              "grams": 190,
+              "minGrams": 140,
+              "maxGrams": 240,
+              "method": "visual_only",
+              "evidence": "Synthetic estimate generated solely to check the scorer"
+            },
+            "obscured": false
+          },
+          {
+            "id": "item-2",
+            "predictedName": "chicken",
+            "foodState": "cooked",
+            "identificationConfidence": "medium",
+            "visibleEvidence": [
+              "Illustrative appearance only; no actual image provided"
+            ],
+            "alternativeNames": [],
+            "ediblePortion": {
+              "grams": 135,
+              "minGrams": 90,
+              "maxGrams": 200,
+              "method": "visual_only",
+              "evidence": "Synthetic estimate generated solely to check the scorer"
+            },
+            "obscured": false
+          }
+        ],
+        "hiddenOrUnquantified": [
+          "Unmeasured cooking oil"
+        ],
+        "questions": [
+          "Example only: please confirm consumed amount"
+        ],
+        "coverage": "partial_or_obscured"
+      }
+    },
+    {
+      "caseId": "synthetic-soup-misidentified",
+      "estimate": {
+        "schemaVersion": "nutrition.photo_estimate.v1",
+        "imageAssessment": {
+          "view": "oblique",
+          "scaleReference": "none",
+          "limitations": [
+            "No physical image exists in this synthetic example"
+          ]
+        },
+        "items": [
+          {
+            "id": "item-1",
+            "predictedName": "vegetable soup",
+            "foodState": "cooked",
+            "identificationConfidence": "medium",
+            "visibleEvidence": [
+              "Illustrative appearance only; no actual image provided"
+            ],
+            "alternativeNames": [],
+            "ediblePortion": {
+              "grams": 280,
+              "minGrams": 180,
+              "maxGrams": 350,
+              "method": "visual_only",
+              "evidence": "Synthetic estimate generated solely to check the scorer"
+            },
+            "obscured": false
+          }
+        ],
+        "hiddenOrUnquantified": [],
+        "questions": [
+          "Example only: please confirm consumed amount"
+        ],
+        "coverage": "partial_or_obscured"
+      }
+    },
+    {
+      "caseId": "synthetic-dessert-abstention",
+      "estimate": {
+        "schemaVersion": "nutrition.photo_estimate.v1",
+        "imageAssessment": {
+          "view": "oblique",
+          "scaleReference": "none",
+          "limitations": [
+            "No physical image exists in this synthetic example"
+          ]
+        },
+        "items": [
+          {
+            "id": "item-1",
+            "predictedName": "unknown dessert",
+            "foodState": "cooked",
+            "identificationConfidence": "medium",
+            "visibleEvidence": [
+              "Illustrative appearance only; no actual image provided"
+            ],
+            "alternativeNames": [],
+            "ediblePortion": {
+              "grams": null,
+              "minGrams": null,
+              "maxGrams": null,
+              "method": "not_estimable",
+              "evidence": "Synthetic estimate generated solely to check the scorer"
+            },
+            "obscured": false
+          },
+          {
+            "id": "item-2",
+            "predictedName": "mint leaf",
+            "foodState": "cooked",
+            "identificationConfidence": "medium",
+            "visibleEvidence": [
+              "Illustrative appearance only; no actual image provided"
+            ],
+            "alternativeNames": [],
+            "ediblePortion": {
+              "grams": 10,
+              "minGrams": 5,
+              "maxGrams": 30,
+              "method": "visual_only",
+              "evidence": "Synthetic estimate generated solely to check the scorer"
+            },
+            "obscured": false
+          }
+        ],
+        "hiddenOrUnquantified": [],
+        "questions": [
+          "Example only: please confirm consumed amount"
+        ],
+        "coverage": "partial_or_obscured"
+      }
+    }
+  ]
+}

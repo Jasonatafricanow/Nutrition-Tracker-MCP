@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "nutrition.photo_benchmark.v1",
+  "datasetKind": "synthetic",
+  "cases": [
+    {
+      "caseId": "synthetic-rice-chicken",
+      "imageRef": null,
+      "referenceItems": [
+        {
+          "id": "gt-rice",
+          "name": "cooked rice",
+          "grams": 180,
+          "visible": true
+        },
+        {
+          "id": "gt-chicken",
+          "name": "cooked chicken",
+          "grams": 150,
+          "visible": true
+        },
+        {
+          "id": "gt-oil",
+          "name": "hidden cooking oil",
+          "grams": 12,
+          "visible": false
+        }
+      ]
+    },
+    {
+      "caseId": "synthetic-soup-misidentified",
+      "imageRef": null,
+      "referenceItems": [
+        {
+          "id": "gt-fish-soup",
+          "name": "fish soup",
+          "grams": 320,
+          "visible": true
+        }
+      ]
+    },
+    {
+      "caseId": "synthetic-dessert-abstention",
+      "imageRef": null,
+      "referenceItems": [
+        {
+          "id": "gt-dessert",
+          "name": "filled dessert",
+          "grams": 125,
+          "visible": true
+        }
+      ]
+    }
+  ]
+}

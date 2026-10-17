@@ -239,6 +239,18 @@ The optional webhook accepts `weightKg` / `scaleWeightKg`, `hrvMs`, `hrvMetric`,
 
 **Why SQLite and SSE?** One local ledger is shared across the MCP and web surfaces. SQLite WAL supports access from multiple processes; `PRAGMA data_version` polling lets an existing dashboard notice changes made by another instance. SSE keeps the browser dependency-free.
 
+
+## Photo-estimation evaluation (Agent-first)
+
+The photo compiler uses a strict intermediate representation, but **schema-valid JSON is not evidence of accurate food recognition or edible-gram estimation**. Run an isolated blind benchmark before claiming accuracy or changing the vision prompt.
+
+```bash
+node audit/eval-photo-estimates.mjs --example
+node --test test/photo-benchmark.test.js
+```
+
+The committed example is **synthetic and contains no photographs**, so its printed percentages are *not* vision-model metrics. See [the weighed-photo benchmark protocol](docs/PHOTO_BENCHMARK.md) for the split reference / prediction / human-review files, confidence and interval-coverage measures, and private real-photo collection. Production MCP tools and Dashboard remain unchanged.
+
 ## Known limitations and security
 
 - **Prototype / single-user** design. Browser write protection is based on same-origin CSRF tokens; programmatic HTTP writes use a manually configured bearer token. It is not a multi-user auth system. Local processes can reach the loopback interface. Keep the HTTP server on `127.0.0.1` and do not expose it on an untrusted network.

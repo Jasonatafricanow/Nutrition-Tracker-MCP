@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "nutrition.photo_benchmark.v1",
+  "cases": [
+    {
+      "caseId": "synthetic-rice-chicken",
+      "assignments": [
+        {
+          "predictedId": "item-1",
+          "referenceId": "gt-rice",
+          "identity": "correct"
+        },
+        {
+          "predictedId": "item-2",
+          "referenceId": "gt-chicken",
+          "identity": "correct"
+        }
+      ]
+    },
+    {
+      "caseId": "synthetic-soup-misidentified",
+      "assignments": [
+        {
+          "predictedId": "item-1",
+          "referenceId": "gt-fish-soup",
+          "identity": "wrong"
+        }
+      ]
+    },
+    {
+      "caseId": "synthetic-dessert-abstention",
+      "assignments": [
+        {
+          "predictedId": "item-1",
+          "referenceId": "gt-dessert",
+          "identity": "broad"
+        },
+        {
+          "predictedId": "item-2",
+          "referenceId": null,
+          "identity": "unmatched"
+        }
+      ]
+    }
+  ]
+}

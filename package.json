@@ -2,7 +2,7 @@
   "name": "nutrition-tracker-mcp",
   "version": "5.2.0-alpha.2",
   "private": true,
-  "description": "Agent-first MCP nutrition ledger with quick meal logging, reusable templates and feedback calibration",
+  "description": "Agent-first MCP nutrition ledger: fast meal logging, reusable templates, local-first tracking and cautious TDEE calibration",
   "type": "module",
   "main": "server.js",
   "engines": {
@@ -11,7 +11,9 @@
   "scripts": {
     "start": "node server.js",
     "demo": "node server.js --demo",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:photo-benchmark": "node --test test/photo-benchmark.test.js",
+    "eval:photo:example": "node audit/eval-photo-estimates.mjs --example"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
