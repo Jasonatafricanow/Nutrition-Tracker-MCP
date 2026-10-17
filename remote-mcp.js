@@ -37,10 +37,10 @@ function allowedOrigin(origin, allow) {
  * @param {{makeServer:()=>import('@modelcontextprotocol/sdk/server/mcp.js').McpServer,
  *   config?:NodeJS.ProcessEnv, log?:(...args:any[])=>void}} opts
  */
-export function startRemoteMcp({makeServer,resolvePrincipal=null,config=process.env,log=console.error}) {
+export function startRemoteMcp({makeServer,config=process.env,log=console.error}) {
   if (!isTrue(config.MCP_HTTP_ENABLED)) return null;
   const token=config.MCP_HTTP_TOKEN;
-  if (!resolvePrincipal && (typeof token!=='string' || Buffer.byteLength(token)<32)) {
+  if (typeof token!=='string' || Buffer.byteLength(token)<32) {
     throw new Error('MCP_HTTP_TOKEN must be a secret of at least 32 bytes when remote MCP is enabled');
   }
   const host=config.MCP_HTTP_HOST || '127.0.0.1';
@@ -63,12 +63,10 @@ export function startRemoteMcp({makeServer,resolvePrincipal=null,config=process.
     if (!currentHost || !hosts.has(currentHost)) return res.status(403).json({error:'MCP Host denied'});
     if (!allowedOrigin(req.get('Origin'),origins)) return res.status(403).json({error:'MCP Origin denied'});
     const bearer=req.get('Authorization')?.match(/^Bearer (.+)$/i)?.[1];
-    const principal=resolvePrincipal ? resolvePrincipal(bearer) : (compare(bearer,token) ? {id:'legacy-single-user'} : null);
-    if (!principal) {
+    if (!compare(bearer,token)) {
       res.setHeader('WWW-Authenticate','Bearer realm="nutrition-mcp"');
       return res.status(401).json({error:'MCP authentication required'});
     }
-    req.mcpPrincipal=principal;
     next();
   });
   app.post('/mcp',async(req,res)=>{
@@ -76,7 +74,7 @@ export function startRemoteMcp({makeServer,resolvePrincipal=null,config=process.
     ++active;
     let mcp;
     try {
-      mcp=makeServer(req.mcpPrincipal);
+      mcp=makeServer();
       const transport=new StreamableHTTPServerTransport({
         sessionIdGenerator:undefined,
         enableJsonResponse:true,

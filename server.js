@@ -14,8 +14,6 @@ import { AGENT_WORKFLOW, AGENT_WORKFLOW_VERSION } from "./agent-workflow.js";
 import { createUSDAClient } from "./usda-foods.js";
 import { z } from "zod";
 import { startRemoteMcp } from "./remote-mcp.js";
-import { createFamilyAccounts } from "./family-accounts.js";
-import { createFamilyHealth } from "./family-health.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = process.argv.includes("--demo");
@@ -28,12 +26,6 @@ const USE_STDIO = !process.stdin.isTTY && !process.argv.includes("--no-stdio");
 const log = (...a) => console.error("[Nutrition Tracker MCP]", ...a); // stdout 留给 MCP 协议
 const engine = createEngine(DB_PATH, { demo: DEMO });
 const usda = createUSDAClient();
-const family = process.env.FAMILY_REGISTRY_PATH ? createFamilyAccounts({
-  registryPath:process.env.FAMILY_REGISTRY_PATH,
-  dir:process.env.FAMILY_DATA_DIR || path.join(__dirname,'private-family-data'),
-  engineFactory:createEngine
-}) : null;
-const familyHealth = family ? createFamilyHealth({accounts:family,dir:process.env.FAMILY_DATA_DIR || path.join(__dirname,'private-family-data')}) : null;
 const csrfToken = randomBytes(32).toString("hex");
 const apiToken = process.env.NUTRITION_API_TOKEN;
 const webhookToken = process.env.HEALTH_WEBHOOK_TOKEN;
@@ -154,52 +146,17 @@ setInterval(() => {
 }, 60_000).unref();
 
 // ==================== MCP ====================
-function createMcpServer(principal) {
-  const memberEngine = family && principal ? family.engineFor(principal) : engine;
-  const memberRun = (name,args) => {
-    const result=memberEngine.execute(name,args,'MCP_AGENT');
-    if(memberEngine===engine && name!=='get_snapshot')broadcast();
-    return result;
-  };
+function createMcpServer() {
   const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.3.0-beta.1" });
 
   for (const [name, def] of Object.entries(TOOL_DEFS)) {
     mcp.registerTool(name, { description: def.description, inputSchema: def.shape }, async (args) => {
       try {
-        return { content: [{ type: "text", text: JSON.stringify(memberRun(name, args), null, 1) }] };
+        return { content: [{ type: "text", text: JSON.stringify(run(name, args, "MCP_AGENT"), null, 1) }] };
       } catch (e) {
         return { isError: true, content: [{ type: "text", text: e.message }] };
       }
     });
-  }
-
-  if (family && principal) {
-    const ftool=(name,description,schema,action)=>mcp.registerTool(name,{description,inputSchema:schema},async args=>{
-      try{return {content:[{type:'text',text:JSON.stringify(action(args))}]};}
-      catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}
-    });
-    ftool('family_directory','List household member names and which summaries this caller may read.',{},()=>({members:family.directory(principal)}));
-    ftool('set_family_sharing','As the currently authenticated owner, grant or revoke one member a specific read scope.',{
-      granteeId:z.string().min(1),scope:z.enum(['overview','health_trends']),enabled:z.boolean()
-    },args=>family.setSharing(principal,args.granteeId,args.scope,args.enabled));
-    ftool('get_family_overview','Read a member limited overview only if their permission is granted.',{
-      memberId:z.string().min(1)
-    },args=>family.getOverview(principal,args.memberId));
-    ftool('set_wellness_mode','Choose general wellness (default) or opt-in athletic performance interpretation.',{
-      mode:z.enum(['general','performance'])
-    },args=>familyHealth.setMode(principal,args.mode));
-    ftool('log_health_observation','Record user-supplied blood pressure, temperature, glucose or symptom notes privately for the authenticated member.',{
-      kind:z.enum(['blood_pressure','temperature_c','glucose_mg_dl','symptom_note']),
-      observedAt:z.string().optional(),systolic:z.number().optional(),diastolic:z.number().optional(),
-      value:z.number().optional(),context:z.string().max(100).optional(),note:z.string().max(500).optional(),
-      sourceEventId:z.string().max(120).optional()
-    },args=>familyHealth.record(principal,args));
-    ftool('get_my_health_history','Read own health observations and private notes; never exposes another member notes.',{
-      days:z.number().int().min(1).max(90).default(30)
-    },args=>familyHealth.history(principal,args));
-    ftool('get_family_health_report','Read self or separately consented family health trends; no diagnosis or health score.',{
-      memberId:z.string().min(1).optional(),days:z.number().int().min(7).max(90).default(30)
-    },args=>familyHealth.report(principal,args));
   }
 
   mcp.registerTool('get_agent_workflow', {
@@ -223,12 +180,6 @@ function createMcpServer(principal) {
     catch(e){return {isError:true,content:[{type:'text',text:String(e.message)}]};}
   });
 
-  if(family && principal) mcp.registerPrompt('family_wellness_workflow',{
-    title:'Family wellness observations and conservative interpretation',
-    description:'Agent-first general health observations, consent, trends, and privacy without diagnosis.'
-  },async()=>({description:'nutrition.family_wellness.v1',messages:[{role:'user',content:{type:'text',text:
-    'Use get_family_health_report for consented trends and get_my_health_history for private health notes. Use log_health_observation only for user-provided readings with correct units and timestamps. Do not invent measurements or diagnoses; missing data is not evidence of good health. General wellness is the default; athletic carb cycling is opt-in via set_wellness_mode. Never share raw personal symptom notes with a relative. Before changing sharing, obtain explicit owner approval. For medical concerns encourage appropriate professional assessment.'}}]}));
-
   mcp.registerPrompt('nutrition_agent_workflow', {
     title:'Agent-first nutrition logging workflow',
     description:'Route text meals, photos, corrections and external food search into validated MCP operations.'
@@ -247,14 +198,14 @@ function createMcpServer(principal) {
     "snapshot",
     "telemetry://snapshot",
     { description: "今日档位、宏量配额与已摄入、生物遥测、7 日预测、补剂、TDEE 校准诊断的全量快照", mimeType: "application/json" },
-    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(memberEngine.buildSnapshot(), null, 1) }] })
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(engine.buildSnapshot(), null, 1) }] })
   );
 
   return mcp;
 }
 
 // Optional remote MCP, isolated from the Dashboard HTTP listener.
-startRemoteMcp({makeServer:createMcpServer,resolvePrincipal:family ? family.forToken : null,log});
+startRemoteMcp({makeServer:createMcpServer,log});
 
 if (USE_STDIO) {
   const mcp=createMcpServer();
