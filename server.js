@@ -15,6 +15,7 @@ import { createUSDAClient } from "./usda-foods.js";
 import { z } from "zod";
 import { startRemoteMcp } from "./remote-mcp.js";
 import { createFamilyAccounts } from "./family-accounts.js";
+import { createFamilyHealth } from "./family-health.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = process.argv.includes("--demo");
@@ -32,6 +33,7 @@ const family = process.env.FAMILY_REGISTRY_PATH ? createFamilyAccounts({
   dir:process.env.FAMILY_DATA_DIR || path.join(__dirname,'private-family-data'),
   engineFactory:createEngine
 }) : null;
+const familyHealth = family ? createFamilyHealth({accounts:family,dir:process.env.FAMILY_DATA_DIR || path.join(__dirname,'private-family-data')}) : null;
 const csrfToken = randomBytes(32).toString("hex");
 const apiToken = process.env.NUTRITION_API_TOKEN;
 const webhookToken = process.env.HEALTH_WEBHOOK_TOKEN;
@@ -183,6 +185,21 @@ function createMcpServer(principal) {
     ftool('get_family_overview','Read a member limited overview only if their permission is granted.',{
       memberId:z.string().min(1)
     },args=>family.getOverview(principal,args.memberId));
+    ftool('set_wellness_mode','Choose general wellness (default) or opt-in athletic performance interpretation.',{
+      mode:z.enum(['general','performance'])
+    },args=>familyHealth.setMode(principal,args.mode));
+    ftool('log_health_observation','Record user-supplied blood pressure, temperature, glucose or symptom notes privately for the authenticated member.',{
+      kind:z.enum(['blood_pressure','temperature_c','glucose_mg_dl','symptom_note']),
+      observedAt:z.string().optional(),systolic:z.number().optional(),diastolic:z.number().optional(),
+      value:z.number().optional(),context:z.string().max(100).optional(),note:z.string().max(500).optional(),
+      sourceEventId:z.string().max(120).optional()
+    },args=>familyHealth.record(principal,args));
+    ftool('get_my_health_history','Read own health observations and private notes; never exposes another member notes.',{
+      days:z.number().int().min(1).max(90).default(30)
+    },args=>familyHealth.history(principal,args));
+    ftool('get_family_health_report','Read self or separately consented family health trends; no diagnosis or health score.',{
+      memberId:z.string().min(1).optional(),days:z.number().int().min(7).max(90).default(30)
+    },args=>familyHealth.report(principal,args));
   }
 
   mcp.registerTool('get_agent_workflow', {
@@ -205,6 +222,12 @@ function createMcpServer(principal) {
     try {return {content:[{type:'text',text:JSON.stringify(await usda.details(fdcId))}]};}
     catch(e){return {isError:true,content:[{type:'text',text:String(e.message)}]};}
   });
+
+  if(family && principal) mcp.registerPrompt('family_wellness_workflow',{
+    title:'Family wellness observations and conservative interpretation',
+    description:'Agent-first general health observations, consent, trends, and privacy without diagnosis.'
+  },async()=>({description:'nutrition.family_wellness.v1',messages:[{role:'user',content:{type:'text',text:
+    'Use get_family_health_report for consented trends and get_my_health_history for private health notes. Use log_health_observation only for user-provided readings with correct units and timestamps. Do not invent measurements or diagnoses; missing data is not evidence of good health. General wellness is the default; athletic carb cycling is opt-in via set_wellness_mode. Never share raw personal symptom notes with a relative. Before changing sharing, obtain explicit owner approval. For medical concerns encourage appropriate professional assessment.'}}]}));
 
   mcp.registerPrompt('nutrition_agent_workflow', {
     title:'Agent-first nutrition logging workflow',
