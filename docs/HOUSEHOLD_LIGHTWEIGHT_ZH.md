@@ -44,6 +44,21 @@
 - `barcode`：8–14 位商品条码查询 Open Food Facts，返回带外部来源标记的包装营养值；不是本地已校验食物，不自动入账。
 - `report`：7 或 30 天简短饮食/睡眠/心率/活动趋势报告，未记录的日期不能当作零摄入。
 
+## 设备批量导入（沿用原有私有 Webhook）
+
+保持原 `POST /api/health-webhook` 的 Bearer Token 验证和单条格式。家庭设备可发送：
+
+```json
+{"memberId":"adult_a","events":[
+ {"sourceEventId":"watch:2026-10-17:sleep","measuredAt":"2026-10-17T23:00:00+08:00","sleepHours":6.5},
+ {"sourceEventId":"watch:2026-10-17:rhr","measuredAt":"2026-10-17T23:00:00+08:00","rhrBpm":63}
+]}
+```
+
+最多 30 条，同一请求只属于一个家庭成员。每条记录必须包含稳定 `sourceEventId` 和带时区的 `measuredAt`；重复导入不会重复记录。部分失败返回 HTTP 207 及逐项错误，手机自动化需要检查结果并重试失败项。此接口没有自动拉取手环云端数据的能力；手机端仍需要快捷指令/Health Auto Export 等主动发送。
+
+默认两工具不变；`nutrition_execute.args` 对常用餐食、更正和打卡提供可发现的类型字段，复杂/低频操作继续由原引擎校验。
+
 ## 两个工具的日常用法
 
 - 普通用户默认一句话记餐：`nutrition_execute({memberId:'adult_a',operation:'quick_meal',args:{mealSlot:'午餐',source:'text',items:[{name:'米饭',weightGrams:150,foodId:'f7'}],requestId:'unique-meal-event'}})`，注明估算、可改。不必逐项确认估重。照片不能走 `quick_meal` 直写；识别预览后一轮确认，底层复用原有草稿与确认操作。
