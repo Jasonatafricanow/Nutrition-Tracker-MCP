@@ -37,6 +37,13 @@
 
 普通文字记餐可使用 `quick_meal` 直接记录估算值；**照片必须先向用户展示识别种类与大致份量并得到一次整体确认**，再以原有 `photo_stage` / `photo_confirm` 写入。不要为照片中每种食物分别追问。
 
+## 追加的低摩擦能力
+
+- `recent_correction`：用户只需说「刚才米饭是 220 克」，Agent 直接按食物名定位最近一次记录并审计修改。同一天同名出现多次时返回歧义，请用户补充餐次；不猜测修改目标。
+- `family_recipes`：汇总各成员已保存的餐食模板，用于家庭共餐建议与不同份量，不新建库存和权限管理。
+- `barcode`：8–14 位商品条码查询 Open Food Facts，返回带外部来源标记的包装营养值；不是本地已校验食物，不自动入账。
+- `report`：7 或 30 天简短饮食/睡眠/心率/活动趋势报告，未记录的日期不能当作零摄入。
+
 ## 两个工具的日常用法
 
 - 普通用户默认一句话记餐：`nutrition_execute({memberId:'adult_a',operation:'quick_meal',args:{mealSlot:'午餐',source:'text',items:[{name:'米饭',weightGrams:150,foodId:'f7'}],requestId:'unique-meal-event'}})`，注明估算、可改。不必逐项确认估重。照片不能走 `quick_meal` 直写；识别预览后一轮确认，底层复用原有草稿与确认操作。
