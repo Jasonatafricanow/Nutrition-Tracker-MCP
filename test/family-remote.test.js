@@ -39,7 +39,7 @@ async function conn(base,token){const client=new Client({name:'family-client',ve
  const transport=new StreamableHTTPClientTransport(new URL(base+'/mcp'),{requestInit:{headers:{Authorization:'Bearer '+token}}});
  await client.connect(transport);return client;
 }
-const result=async (client,name,args={})=>{const x=await client.callTool({name,arguments:args});return {error:x.isError===true,data:JSON.parse(x.content[0].text)};};
+const result=async (client,name,args={})=>{const x=await client.callTool({name,arguments:args});let data;try{data=JSON.parse(x.content[0].text);}catch{data=x.content[0].text;}return {error:x.isError===true,data};};
 test('remote family MCP isolates ledgers and limits sharing by caller identity',async()=>{
  const s=await setup();let a,b;
  try{
