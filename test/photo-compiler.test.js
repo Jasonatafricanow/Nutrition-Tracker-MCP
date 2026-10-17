@@ -63,7 +63,7 @@ test('no foodId fabricated by the image compilation; invalid food matches fail a
 test('MCP prompt discovery and compile/confirm work through an actual stdio client', async()=>{
  const dir=mkdtempSync(path.join(os.tmpdir(),'nutrition-photo-mcp-'));
  const client=new Client({name:'photo-compiler-test',version:'1'});
- const transport=new StdioClientTransport({command:process.execPath,args:[path.join(root,'server.js')],env:{...process.env,DB_PATH:path.join(dir,'db.sqlite'),PORT:'0',HOST:'127.0.0.1',NUTRITION_TIME_ZONE:'Asia/Shanghai'}});
+ const transport=new StdioClientTransport({command:process.execPath,args:[path.join(root,'server.js')],env:{...process.env,MCP_TOOL_SURFACE:"full",DB_PATH:path.join(dir,'db.sqlite'),PORT:'0',HOST:'127.0.0.1',NUTRITION_TIME_ZONE:'Asia/Shanghai'}});
  try{
    await client.connect(transport);
    const prompts=await client.listPrompts();

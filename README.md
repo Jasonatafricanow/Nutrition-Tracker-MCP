@@ -6,9 +6,27 @@
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-303633?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/) [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-stdio-303633?style=flat-square)](https://modelcontextprotocol.io/) ![Storage](https://img.shields.io/badge/SQLite-local--first-303633?style=flat-square) ![Status](https://img.shields.io/badge/status-portfolio%20prototype-B53A27?style=flat-square)
 
-**[Remote MCP deployment (中文)](docs/REMOTE_MCP_DEPLOYMENT_ZH.md) · [本地 Agent 安装说明](docs/INSTALL_AND_AGENT_SETUP_ZH.md) · [Preview](#interface-preview) · [Quick start](#quick-start) · [Architecture](#architecture) · [MCP tools](#mcp-integration) · [Design decisions](#engineering-notes)**
+**[Remote MCP deployment (中文)](docs/REMOTE_MCP_DEPLOYMENT_ZH.md) · [Preview](#interface-preview) · [Quick start](#quick-start) · [Architecture](#architecture) · [MCP tools](#mcp-integration) · [Design decisions](#engineering-notes)**
 
 </div>
+
+---
+
+## Current development: lightweight family NAS + compact Agent MCP
+
+This branch rebuilds household features **from the pre-family v5.3 baseline**. The household is the trusted boundary; member IDs label data, not accounts. No family SaaS login, per-member Bearer tokens or repeated sharing consent flows. Two default MCP tools replace the exposed dozens of low-level operations; the existing nutrition engine remains authoritative. Full legacy tools are available only with `MCP_TOOL_SURFACE=full` for migration.
+
+**[中文部署、Agent 接入及使用场景](docs/HOUSEHOLD_LIGHTWEIGHT_ZH.md)** · Example configuration: [`household.example.json`](household.example.json) · Docker Compose overlay: [`compose.household.yml`](compose.household.yml).
+
+**Common Agent conversations (one or two tool calls):**
+
+- **Family meal:** “We have chicken, potatoes and greens. What can we cook tonight?” → `nutrition_query({view:"household",focus:"food"})` → shared meal with per-person portion differences, normal eaters unaffected by an athlete's carb cycle.
+- **Routine wellness:** “What has the family been like recently?” → `nutrition_query({view:"household",focus:"health"})` → recent sleep/HRV/resting heart rate/activity/weight and user-entered vitals; a relevant concern may be mentioned once naturally, not every turn.
+- **Daily check-in:** “Jo slept only five hours last night.” → `nutrition_execute({operation:"checkin",memberId:"jo",args:{sleepHours:5}})` → direct brief updated context, no second snapshot call.
+- **Food + logging:** “150g cooked rice and 180g chicken for Alex.” → batched `nutrition_query({view:"foods",memberId:"alex",queries:["cooked rice","chicken"]})` → verify food IDs and preparation → `nutrition_execute({operation:"meal",memberId:"alex",args:{mealSlot:"午餐",items:[...],requestId:"unique-meal"}})`.
+- **Photo intake:** photo compiler MCP Prompt only on photo turns → ingredient matching → unconfirmed draft → user approval → confirmed write. Do not silently invent grams/macros.
+
+The compact tool catalog reduces repeated model tool-selection context, but real Agent accuracy must still be evaluated from conversation traces. The optional Dashboard adds a read-only family summary; it is not the primary workflow.
 
 ---
 
@@ -20,7 +38,7 @@ The application brings together daily food logging, weekly carb cycling, optiona
 
 The central deliverable is a **compiled, schema-validated photo estimate**, not a generic image caption. It separates observed evidence, inferred food identity, edible mass ranges, unknowns and questions before the Agent performs local food-library matching. A photograph alone never creates a measured food weight.
 
-> **Merged into `main`** together with authenticated remote Streamable HTTP MCP. Existing v5.1 safety behavior is preserved; advanced features are available without changing branches.
+> The historical feature notes below describe the underlying engine. In this development branch, the default Agent interface is the two-tool compact surface documented above.
 
 MCP is the product interface. These features require **no dashboard UI**:
 
@@ -89,7 +107,7 @@ The visual direction is an **editorial training journal**: warm paper, ink-like 
 | **02** | Diet and supplement ledger | Meal portions, food library, daily totals, supplement check-ins, local persistence |
 | **03** | Recovery inputs | Optional HRV, resting heart rate, sleep, activity, and weight check-ins |
 | **04** | Adaptive TDEE | Weight-trend comparison, bounded corrections, calibration diagnostics |
-| **05** | MCP-native controls | 29 tools (26 engine + 3 agent-side integrations) and one read-only snapshot resource for an AI agent |
+| **05** | MCP-native controls | 2 default compact Agent tools; complete legacy tool catalog available only with `MCP_TOOL_SURFACE=full` |
 | **06** | Live observability | HTTP dashboard, SSE updates, SQLite WAL and cross-process change detection |
 
 ## v5.1 correctness and safety changes
@@ -119,14 +137,6 @@ curl -X POST http://127.0.0.1:3456/api/health-webhook \
 Tokens must be kept private; do not commit them to Git. The local browser dashboard obtains its own ephemeral write token via `/api/session` and does not need an environment variable. Programmatic HTTP tools can use `NUTRITION_API_TOKEN` as a Bearer token; stdio MCP remains separate.
 
 **Migration notes:** older databases are migrated in-place by adding columns. Previous weight EWMA values and historical intake records are **not certified as complete**. Reconfirm logs before calibration; retain a backup of your SQLite file. The deprecated `dewatered_weight_kg` column now mirrors scale weight for newly processed readings. Earlier historical values are not bulk overwritten unless weight trends are recomputed.
-
-## Family wellness observations (experimental)
-
-Additional member-scoped MCP tools record user-supplied blood pressure, temperature, glucose and private notes, and provide limited, separately consented observational trends. General wellness is the default; athletic performance is opt-in. No diagnostic health score or medical treatment advice. See [家庭健康记录与 Agent 解读](docs/FAMILY_WELLNESS_ZH.md).
-
-## Family multi-user remote MCP (experimental)
-
-Enable `FAMILY_REGISTRY_PATH` and `FAMILY_DATA_DIR` to bind each remote token to a physically separate SQLite ledger. Sharing defaults to denied; members may grant or revoke limited `overview` and `health_trends` scopes individually. See [家庭多用户部署手册](docs/FAMILY_USERS_ZH.md) and [compose.family.yml](compose.family.yml). The local Dashboard is not a family member login UI.
 
 ## Quick start
 
@@ -188,7 +198,7 @@ Nutrition-Tracker-MCP/
 
 ## Remote MCP (optional)
 
-The main branch now includes **authenticated Streamable HTTP MCP** on a separate `MCP_HTTP_PORT` (default 3457), while retaining local stdio and keeping Dashboard HTTP private. Remote MCP is **disabled by default**. It requires `MCP_HTTP_ENABLED=1`, a strong `MCP_HTTP_TOKEN`, TLS reverse proxy for off-machine access, and strict Host/Origin allowlists. No OAuth or multi-user isolation is provided. **See the [Chinese remote MCP / NAS deployment guide](docs/REMOTE_MCP_DEPLOYMENT_ZH.md)** for Docker Compose, Caddy, credentials, and Agent connection settings.
+The experimental branch adds **authenticated Streamable HTTP MCP** on a separate `MCP_HTTP_PORT` (default 3457), while retaining local stdio and keeping Dashboard HTTP private. Remote MCP is **disabled by default**. It requires `MCP_HTTP_ENABLED=1`, a strong `MCP_HTTP_TOKEN`, TLS reverse proxy for off-machine access, and strict Host/Origin allowlists. No OAuth or multi-user isolation is provided. **See the [Chinese remote MCP / NAS deployment guide](docs/REMOTE_MCP_DEPLOYMENT_ZH.md)** for Docker Compose, Caddy, credentials, and Agent connection settings.
 
 ## MCP integration
 

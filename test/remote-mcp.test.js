@@ -17,7 +17,7 @@ async function freePort() {return new Promise((resolve,reject)=>{const s=createS
 async function setup(options={}) {
   const dir=mkdtempSync(path.join(tmpdir(),'nutrition-remote-'));
   const p=await freePort(), ui=await freePort();
-  const env={...process.env,PORT:String(ui),HOST:'127.0.0.1',DB_PATH:path.join(dir,'ledger.db'),NUTRITION_TIME_ZONE:'Asia/Shanghai',MCP_HTTP_ENABLED:'1',MCP_HTTP_PORT:String(p),MCP_HTTP_HOST:'127.0.0.1',MCP_HTTP_TOKEN:TOKEN,MCP_ALLOWED_ORIGINS:'http://agent.example.test',MCP_ALLOWED_HOSTS:'agent.example.test',...options};
+  const env={...process.env,MCP_TOOL_SURFACE:"full",PORT:String(ui),HOST:'127.0.0.1',DB_PATH:path.join(dir,'ledger.db'),NUTRITION_TIME_ZONE:'Asia/Shanghai',MCP_HTTP_ENABLED:'1',MCP_HTTP_PORT:String(p),MCP_HTTP_HOST:'127.0.0.1',MCP_HTTP_TOKEN:TOKEN,MCP_ALLOWED_ORIGINS:'http://agent.example.test',MCP_ALLOWED_HOSTS:'agent.example.test',...options};
   const child=spawn(process.execPath,[path.join(root,'server.js'),'--no-stdio'],{cwd:root,env,stdio:['ignore','ignore','pipe']});
   let errors='';child.stderr.on('data',d=>errors+=d.toString());
   const base=`http://127.0.0.1:${p}`;
@@ -77,7 +77,7 @@ test('real Streamable HTTP MCP client handshake, prompts, tools and shared persi
 
 test('remote refuses startup without a valid long bearer secret',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'nutrition-no-secret-'));
- const env={...process.env,HOST:'127.0.0.1',PORT:'0',DB_PATH:path.join(dir,'ledger.db'),MCP_HTTP_ENABLED:'1',MCP_HTTP_TOKEN:'short'};
+ const env={...process.env,MCP_TOOL_SURFACE:"full",HOST:'127.0.0.1',PORT:'0',DB_PATH:path.join(dir,'ledger.db'),MCP_HTTP_ENABLED:'1',MCP_HTTP_TOKEN:'short'};
  const child=spawn(process.execPath,[path.join(root,'server.js'),'--no-stdio'],{cwd:root,env,stdio:['ignore','ignore','pipe']});
  let log='';child.stderr.on('data',d=>log+=d.toString());
  try {

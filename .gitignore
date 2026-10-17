@@ -9,7 +9,11 @@ node_modules/
 # Private weighed-photo benchmark data and generated evaluation reports
 benchmark/private/
 benchmark/results/
-
 private-data/
 private-family-data/
 family-users.json
+household-data/
+household.json
+
+# Private household member names / config
+household.json

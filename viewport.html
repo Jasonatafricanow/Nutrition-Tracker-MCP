@@ -202,6 +202,12 @@
     footer { margin-top: 64px; padding: 16px 0 48px; border-top: 2px solid var(--ink); font-size: 12px; color: var(--ink-2); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 16px; border-left: 3px solid var(--accent); font-size: 14px; max-width: calc(100vw - 32px); z-index: 10; }
 
+    .household-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:12px; }
+    .household-card { border:1px solid var(--rule); border-radius:8px; padding:14px 16px; background:var(--paper); }
+    .household-card h3 { margin:0 0 10px; font-size:15px; }
+    .household-card .mini { display:flex; flex-wrap:wrap; gap:7px 12px; font-size:12px; line-height:1.7; }
+    .household-card .mini span { color:var(--muted); }
+    .household-card p { font-size:12px; margin:10px 0 0; }
     /* 首屏错落渐入 */
     .reveal { animation: rise .6s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--i, 0) * 60ms); }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
@@ -225,6 +231,12 @@
     </header>
     <div class="ticker reveal" style="--i:1"><span id="evt-time">—</span><span id="evt-summary">等待数据</span></div>
     <div id="offline" class="notice hidden">与服务端断开，正在重连。断开期间数据不会更新，操作也不会执行。</div>
+
+    <!-- 家庭概览：只读，不替代各人的 Agent 交互 -->
+    <section id="household-panel" class="reveal hidden" style="margin:20px 0 28px">
+      <div class="sec-head"><h2>家庭今日概览</h2><span class="aside">数据来自家庭 NAS · 仅供观察</span></div>
+      <div id="household-cards" class="household-cards"></div>
+    </section>
 
     <!-- 今日 -->
     <section class="grid">
@@ -711,6 +723,32 @@
         render(await (await fetch("/api/snapshot")).json());
       }
     });
+
+    async function refreshHousehold() {
+      try {
+        const res=await fetch('/api/household');
+        if (res.status===404) return; // Single-person mode stays unchanged
+        if (!res.ok) return;
+        const data=await res.json();
+        $('household-panel').classList.remove('hidden');
+        $('household-cards').innerHTML=data.members.map(m=>{
+          const x=m.latest, n=m.nutrition;
+          const fields=[['睡眠',x.sleepHours==null?'—':x.sleepHours+'h'],
+            ['静息心率',x.restingHeartRate==null?'—':x.restingHeartRate+' bpm'],
+            ['体重',x.weightKg==null?'—':x.weightKg+' kg'],
+            ['步数',x.steps==null?'—':x.steps]];
+          if(x.bloodPressure)fields.push(['血压',x.bloodPressure.systolic+'/'+x.bloodPressure.diastolic]);
+          if(x.temperatureC)fields.push(['体温',x.temperatureC.value+'°C']);
+          if(n)fields.push(['训练/碳水',({high:'高碳',medium:'中碳',low:'低碳'}[n.carbLevel]||'—')],['剩余碳水',n.remaining.c+' g'],['剩余蛋白',n.remaining.p+' g']);
+          const notes=(m.noteworthy||[]).slice(0,1).map(v=>v.observation).join('；');
+          return `<article class="household-card"><h3>${esc(m.name)} <small>${m.mode==='performance'?'运动营养':'日常观察'}</small></h3>
+            <div class="mini">${fields.map(([a,b])=>`<div><span>${esc(a)}</span> ${esc(b)}</div>`).join('')}</div>
+            ${notes?`<p>${esc(notes)}</p>`:''}</article>`;
+        }).join('');
+      } catch {} // A secondary panel should never break personal nutrition UI
+    }
+    refreshHousehold();
+    setInterval(refreshHousehold,30000);
 
     // ---------- SSE ----------
     function setConn(ok) {
