@@ -103,8 +103,9 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
       const lastByKind={};for(const v of obs)if(lastByKind[v.kind]===undefined)lastByKind[v.kind]=v;
       const recent=rows.filter(r=>r.date>=shiftDay(snapshot.date,-1));
       const latestWith=key=>rows.toReversed().find(r=>r[key]!=null);
-      const recentSleep=recent.find(r=>r.sleep_hours!=null);
-      const recentRhr=recent.find(r=>r.rhr_bpm!=null);
+      // Rows are sorted old → new. Use the most recent, not yesterday's first hit.
+      const recentSleep=recent.toReversed().find(r=>r.sleep_hours!=null);
+      const recentRhr=recent.toReversed().find(r=>r.rhr_bpm!=null);
       const priorRhr=rows.filter(r=>r.rhr_bpm!=null&&r.date<recentRhr?.date).map(r=>r.rhr_bpm);
       const active=[];
       if(recentSleep&&recentSleep.sleep_hours<6)active.push({key:'short_sleep',observation:`最近记录睡眠 ${recentSleep.sleep_hours} 小时`,date:recentSleep.date});

@@ -48,6 +48,11 @@ test('private webhook batch routes to the specified family member, retries idemp
   const result=await first.json();assert.equal(result.succeeded,2);assert.equal(result.failed,0);
   const twice=await post(payload);assert.equal(twice.status,200);
   assert.ok((await twice.json()).results.every(r=>r.duplicate));
+  const conflict=await post({...payload,events:[{measuredAt:time,sourceEventId:'sleep-a',sleepHours:9.5}]});
+  assert.equal(conflict.status,207);
+  const conflictBody=await conflict.json();
+  assert.equal(conflictBody.succeeded,0);
+  assert.match(conflictBody.results[0].error,/sourceEventId/);
   const partial=await post({...payload,events:[{measuredAt:time,sourceEventId:'new-one',steps:1000},
      {measuredAt:time,steps:1000}]});
   assert.equal(partial.status,207);const p=await partial.json();

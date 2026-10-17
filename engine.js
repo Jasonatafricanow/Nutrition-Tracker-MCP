@@ -534,6 +534,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
     CREATE TABLE IF NOT EXISTS health_ingest_events (
       source TEXT NOT NULL, source_event_id TEXT NOT NULL,
       measured_at TEXT, received_at TEXT NOT NULL, ledger_date TEXT NOT NULL,
+      payload_hash TEXT,
       PRIMARY KEY (source, source_event_id)
     );
     CREATE TABLE IF NOT EXISTS mcp_event_journal (
@@ -558,7 +559,8 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
     daily_ledger: [["intake_complete", "INTEGER NOT NULL DEFAULT 0"], ["hrv_metric", "TEXT"], ["weight_measured_at", "TEXT"]],
     meal_logs: [["source_kind", "TEXT"], ["source_ref", "TEXT"], ["portion_source", "TEXT"], ["revision", "INTEGER NOT NULL DEFAULT 0"]],
     photo_meal_drafts: [["confirmation_evidence_json", "TEXT"]],
-    tdee_calibrations: [["evidence_hash", "TEXT"], ["last_observation_date", "TEXT"]]
+    tdee_calibrations: [["evidence_hash", "TEXT"], ["last_observation_date", "TEXT"]],
+    health_ingest_events: [["payload_hash", "TEXT"]]
   })) {
     const have = new Set(q(`PRAGMA table_info(${table})`).all().map((x) => x.name));
     for (const [column, definition] of columns) {
@@ -1012,12 +1014,24 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       const t = a.measuredAt ? localDateStr(new Date(a.measuredAt), timeZone) : today();
       const parts = [];
       const out = { ledgerDate: t };
-      const key = a.sourceEventId ? source + ":" + a.sourceEventId : null;
+      // A repeated device event must mean the same measurement, not merely reuse the ID.
+      // Older rows have no hash; preserve compatibility but explicitly flag unverified retries.
+      const payloadHash = a.sourceEventId
+        ? createHash("sha256").update(JSON.stringify(a)).digest("hex") : null;
       tx(() => {
-        if (key) {
-          const r = q("INSERT OR IGNORE INTO health_ingest_events (source, source_event_id, measured_at, received_at, ledger_date) VALUES (?, ?, ?, ?, ?)")
-            .run(source, a.sourceEventId, a.measuredAt ?? null, nowIso(), t);
-          if (!r.changes) { out.duplicate = true; return; }
+        if (a.sourceEventId) {
+          const r = q("INSERT OR IGNORE INTO health_ingest_events (source, source_event_id, measured_at, received_at, ledger_date, payload_hash) VALUES (?, ?, ?, ?, ?, ?)")
+            .run(source, a.sourceEventId, a.measuredAt ?? null, nowIso(), t, payloadHash);
+          if (!r.changes) {
+            const previous = q("SELECT payload_hash, measured_at, ledger_date FROM health_ingest_events WHERE source=? AND source_event_id=?")
+              .get(source, a.sourceEventId);
+            if (!previous || (previous.payload_hash && previous.payload_hash !== payloadHash)
+              || previous.measured_at !== (a.measuredAt ?? null) || previous.ledger_date !== t)
+              throw new ToolError("sourceEventId 已用于不同的健康数据，请使用新的事件 ID");
+            out.duplicate = true;
+            if (!previous.payload_hash) out.legacyUnverified = true;
+            return;
+          }
         }
         ensureLedger(t);
         if (a.scaleWeightKg != null) {
@@ -1047,7 +1061,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
           }
         }
       });
-      if (out.duplicate) return { result:{ok:true,duplicate:true,ledgerDate:t},summary:null };
+      if (out.duplicate) return { result:{ok:true,duplicate:true,ledgerDate:t,...(out.legacyUnverified?{legacyUnverified:true}:{})},summary:null };
       out.carbLevel=getRow(t).carb_level;
       return { result:out,summary:parts.join("；") || "健康数据已记录" };
     },
