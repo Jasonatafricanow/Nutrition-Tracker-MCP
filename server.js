@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createEngine, TOOL_DEFS, ToolError } from "./engine.js";
+import { PHOTO_ESTIMATION_PROMPT } from "./photo-estimation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = process.argv.includes("--demo");
@@ -141,7 +142,7 @@ setInterval(() => {
 
 // ==================== MCP ====================
 if (USE_STDIO) {
-  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.2.0-alpha.1" });
+  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.2.0-alpha.2" });
 
   for (const [name, def] of Object.entries(TOOL_DEFS)) {
     mcp.registerTool(name, { description: def.description, inputSchema: def.shape }, async (args) => {
@@ -152,6 +153,14 @@ if (USE_STDIO) {
       }
     });
   }
+
+  // MCP prompt: external vision Agent sees the user's image; this server supplies
+  // the compilation protocol and validates the resulting JSON via stage_photo_estimate.
+  mcp.registerPrompt('estimate_meal_photo', {
+    title:'Compile a meal photo into a nutrition estimate',
+    description:'Structured item identification + edible mass ranges with visible evidence, uncertainty, and explicit unknowns (no automatic ledger writes).'
+  }, async () => ({description:'Apply this prompt to the image provided by the user; return JSON for stage_photo_estimate.',
+    messages:[{role:'user',content:{type:'text',text:PHOTO_ESTIMATION_PROMPT}}]}));
 
   mcp.registerResource(
     "snapshot",

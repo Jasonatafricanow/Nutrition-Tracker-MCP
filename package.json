@@ -1,6 +1,6 @@
 {
   "name": "nutrition-tracker-mcp",
-  "version": "5.2.0-alpha.1",
+  "version": "5.2.0-alpha.2",
   "private": true,
   "description": "Agent-first MCP nutrition ledger with quick meal logging, reusable templates and feedback calibration",
   "type": "module",

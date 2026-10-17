@@ -1,25 +1,24 @@
-# Agent-first MCP workflow reference (experiment)
+# Agent-first MCP workflows (experimental)
 
-This project is **an MCP module for AI Agents**, not a dashboard-driven app. The user speaks to an Agent; the Agent asks clarifying questions and calls backend tools; the SQLite engine performs deterministic calculations and persistence. The HTML dashboard is only a readout/review surface.
+This repository is an MCP nutrition-tool module. **The conversation with an AI Agent is the primary interface**; `viewport.html` is a read-only-first dashboard for monitoring and reviewing state. There is no embedded LLM. Tools are registered from the same `TOOL_DEFS` schema into the stdio MCP server.
 
-## Recommended Agent sequence
+## Normal agent session
 
-1. Call `get_agent_context({})` to obtain a compact current state (not the whole sensitive `get_snapshot` payload).
-2. Search foods using `search_foods({ "query": "米饭", "limit": 10 })`. Confirm preparation state (raw vs cooked), weight, and the intended date with the user. Do not silently guess.
-3. Record after confirmation with `log_meal_items({ "mealSlot": "午餐", "items": [{ "foodId": "f7", "weightGrams": 150 }], "requestId": "unique-confirmed-action-123" })`.
-4. A stable `requestId` protects **retries of the same action only**. For another meal—even with identical food—use a new ID. Reusing an ID with changed inputs is an error.
-5. Check the ledger using `get_meal_history({ "date": "2026-10-17" })`. Use meal IDs for corrections via `delete_meal_item`; deleting or adding meals resets that day's intake-complete status.
-6. Call `mark_intake_complete` only when the user explicitly indicates **all meals for that day** have been recorded.
+1. `get_agent_context({})` for a lightweight daily budget and last logged meals. Use `get_snapshot({})` only if detailed planning/diagnostics are needed.
+2. For a new food, `search_foods({ "query": "rice" })` / use Chinese food names if present. Inspect per-100g values, whether a food is raw/cooked, and ask user to confirm **grams**; if no database match exists, obtain reliable macros or ask user before passing explicit values.
+3. `log_meal_items({ "mealSlot": "午餐", "items": [{ "foodId": "f7", "weightGrams": 150 }], "requestId": "stable-on-retry-only" })`.
+4. Use `get_meal_history({ "date": "YYYY-MM-DD" })` to confirm actual storage. The returned meal IDs may be passed to `delete_meal_item` if correction is needed.
+5. Only after the user confirms a day is fully recorded, call `mark_intake_complete` (never automatically on the first meal).
 
-## Reusable meal templates
+## Save and reuse a known meal
 
 ```json
 {"tool":"save_meal_template","args":{"name":"Office lunch","mealSlot":"午餐","date":"2026-10-16"}}
-{"tool":"list_meal_templates","args":{"query":"Office","limit":5}}
-{"tool":"log_meal_template","args":{"templateId":"<returned ID>","mealSlot":"午餐","multiplier":1,"requestId":"another-unique-confirmed-operation"}}
+{"tool":"list_meal_templates","args":{"query":"office","limit":5}}
+{"tool":"log_meal_template","args":{"templateId":"<returned templateId>","mealSlot":"午餐","multiplier":1,"requestId":"new-confirmed-meal-456"}}
 ```
 
-A template snapshots an **already-recorded** meal's names, weights, proteins, carbs and fats. This deliberately does not reflect later edits to food-library values; it also does not mean today's consumption has been measured. Ask the user to confirm whether this time's portions are the same.
+Template items are snapshots of actual logged food macros and masses. They deliberately do **not** inherit future edits to the ingredient library. A multiplier scales the original saved total; it is **not** a claim that the portions were measured again.
 
 ## Backfill and export
 
@@ -28,8 +27,25 @@ A template snapshots an **already-recorded** meal's names, weights, proteins, ca
 {"tool":"export_nutrition_data","args":{"fromDate":"2026-10-01","toDate":"2026-10-17"}}
 ```
 
-Export returns structured JSON via MCP only, not a public download URL. It can include health-related personal information and is restricted to 90 calendar days per request.
+The export is JSON returned to the MCP client. It includes sensitive health and dietary records and should be kept in the user's trusted context. The endpoint bounds requests at 90 days; the tool does not write to cloud storage or create a public URL.
 
-## Model and privacy boundaries
+## Trust boundaries
 
-The engine has no embedded LLM, no automated food photo interpretation and no calorie guessing from chat prose. The Agent must clarify unknown preparation/portion details. The TDEE estimation remains **preview-only by default** and should not be automatically applied. This experimental branch is not a clinically validated nutrition service. Keep the local HTTP server bound to loopback by default.
+- Input amount, food type and preparation state must be confirmed; a language model's guess is **not a measured dietary record**.
+- The backend computes P/C/F and caloric totals, and all writes are stored in SQLite.
+- `requestId` prevents duplicate meals on replay caused by retries. Use one unique ID per confirmed operation; a duplicate with changed content is rejected.
+- History edits intentionally reset `intake_complete`. `calibrate_metabolic_tdee` is still preview-only until an explicit `apply:true`.
+- This experimental branch has not undergone longitudinal human validation. The TDEE and recovery models remain heuristics.
+
+## Photo-to-meal workflow (external vision Agent + MCP)
+
+Photo understanding is **not** a raw image-to-calories operation. Obtain the MCP prompt `estimate_meal_photo` (or invoke `get_photo_estimation_protocol` if the host cannot list prompts), and feed it the photograph already present in the Agent conversation. Its output is a strictly validated `nutrition.photo_estimate.v1` artifact: visual evidence, food hypotheses, edible mass with plausible bounds, explicit unknowns, and questions.
+
+1. Run the vision prompt; do not submit a plain caption or invented exact grams.
+2. Call `search_foods` for the candidate food identities. Verify preparation state; do not invent a `foodId` or macros.
+3. Call `stage_photo_estimate({mealSlot, estimate, matches})`. A draft is persisted but **not** logged as eaten.
+4. Briefly present the inferred food list, gram intervals and unknown sauces/oils to the user. Ask the smallest necessary clarifying question(s).
+5. After approval, call `confirm_photo_meal({draftId, confirmed:true, requestId, decisions:[...]})` and record each reviewed item's portion source (`visual_estimate`, `user_estimate`, `measured`). Omit unknown components only when the user explicitly accepts a partial record.
+6. `get_meal_history` verifies the commit. Never automatically mark the whole day as intake-complete.
+
+See [PHOTO_ESTIMATION_PROTOCOL.md](PHOTO_ESTIMATION_PROTOCOL.md) for the exact compiler contract and worked tool call. MCP is the primary UX; the dashboard is intentionally not involved in this workflow.
