@@ -1,5 +1,7 @@
 # Nutrition Tracker：远程 Streamable HTTP MCP 部署说明
 
+**家庭模式说明：** 当设置 `HOUSEHOLD_CONFIG` 后，共享 NAS 令牌保护整个家庭实例，`memberId` 用于数据归属而非内部访问隔离。下文单用户账本示例适用于未启用家庭模式的部署；家庭使用参见 [轻量部署指南](HOUSEHOLD_LIGHTWEIGHT_ZH.md) 与 [主动权限降级的项目记录](PROJECT_RECORD_ZH.md)。
+
 **正式主线：`main`。** 当前主线已经合并远程 MCP、照片编译、饮食账本、USDA 搜索和 Agent 工作流；stdio 依然可用。
 
 ## 设计边界

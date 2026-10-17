@@ -14,9 +14,11 @@
 
 ## Current development: lightweight family NAS + compact Agent MCP
 
-This branch rebuilds household features **from the pre-family v5.3 baseline**. The household is the trusted boundary; member IDs label data, not accounts. No family SaaS login, per-member Bearer tokens or repeated sharing consent flows. Two default MCP tools replace the exposed dozens of low-level operations; the existing nutrition engine remains authoritative. Full legacy tools are available only with `MCP_TOOL_SURFACE=full` for migration.
+The current `main` implementation rebuilds household features **from the pre-family v5.3 baseline**. The household is the trusted boundary; member IDs label data, not accounts. No family SaaS login, per-member Bearer tokens or repeated sharing consent flows. Two default MCP tools replace the exposed dozens of low-level operations; the existing nutrition engine remains authoritative. Full legacy tools are available only with `MCP_TOOL_SURFACE=full` for migration.
 
-**[中文部署、Agent 接入及使用场景](docs/HOUSEHOLD_LIGHTWEIGHT_ZH.md)** · Example configuration: [`household.example.json`](household.example.json) · Docker Compose overlay: [`compose.household.yml`](compose.household.yml).
+**[家庭权限设计取舍及项目记录](docs/PROJECT_RECORD_ZH.md)** · **[中文部署、Agent 接入及使用场景](docs/HOUSEHOLD_LIGHTWEIGHT_ZH.md)** · Example configuration: [`household.example.json`](household.example.json) · Docker Compose overlay: [`compose.household.yml`](compose.household.yml).
+
+**Access model:** Household `memberId` identifies record ownership, not member-level authentication. Choosing a shared NAS token over per-member credentials and consent gates was a deliberate tradeoff, not an omission: see the [project decision record](docs/PROJECT_RECORD_ZH.md) for the assumptions, risks and criteria for reintroducing granular permissions.
 
 **Common Agent conversations (one or two tool calls):**
 
