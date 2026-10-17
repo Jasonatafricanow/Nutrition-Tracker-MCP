@@ -10,3 +10,7 @@ benchmark/private
 coverage
 *.zip
 .github
+
+private-data
+private-family-data
+family-users.json

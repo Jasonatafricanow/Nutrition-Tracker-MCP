@@ -14,6 +14,7 @@ import { AGENT_WORKFLOW, AGENT_WORKFLOW_VERSION } from "./agent-workflow.js";
 import { createUSDAClient } from "./usda-foods.js";
 import { z } from "zod";
 import { startRemoteMcp } from "./remote-mcp.js";
+import { createFamilyAccounts } from "./family-accounts.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = process.argv.includes("--demo");
@@ -26,6 +27,11 @@ const USE_STDIO = !process.stdin.isTTY && !process.argv.includes("--no-stdio");
 const log = (...a) => console.error("[Nutrition Tracker MCP]", ...a); // stdout 留给 MCP 协议
 const engine = createEngine(DB_PATH, { demo: DEMO });
 const usda = createUSDAClient();
+const family = process.env.FAMILY_REGISTRY_PATH ? createFamilyAccounts({
+  registryPath:process.env.FAMILY_REGISTRY_PATH,
+  dir:process.env.FAMILY_DATA_DIR || path.join(__dirname,'private-family-data'),
+  engineFactory:createEngine
+}) : null;
 const csrfToken = randomBytes(32).toString("hex");
 const apiToken = process.env.NUTRITION_API_TOKEN;
 const webhookToken = process.env.HEALTH_WEBHOOK_TOKEN;
@@ -146,17 +152,37 @@ setInterval(() => {
 }, 60_000).unref();
 
 // ==================== MCP ====================
-function createMcpServer() {
+function createMcpServer(principal) {
+  const memberEngine = family && principal ? family.engineFor(principal) : engine;
+  const memberRun = (name,args) => {
+    const result=memberEngine.execute(name,args,'MCP_AGENT');
+    if(memberEngine===engine && name!=='get_snapshot')broadcast();
+    return result;
+  };
   const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.3.0-beta.1" });
 
   for (const [name, def] of Object.entries(TOOL_DEFS)) {
     mcp.registerTool(name, { description: def.description, inputSchema: def.shape }, async (args) => {
       try {
-        return { content: [{ type: "text", text: JSON.stringify(run(name, args, "MCP_AGENT"), null, 1) }] };
+        return { content: [{ type: "text", text: JSON.stringify(memberRun(name, args), null, 1) }] };
       } catch (e) {
         return { isError: true, content: [{ type: "text", text: e.message }] };
       }
     });
+  }
+
+  if (family && principal) {
+    const ftool=(name,description,schema,action)=>mcp.registerTool(name,{description,inputSchema:schema},async args=>{
+      try{return {content:[{type:'text',text:JSON.stringify(action(args))}]};}
+      catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}
+    });
+    ftool('family_directory','List household member names and which summaries this caller may read.',{},()=>({members:family.directory(principal)}));
+    ftool('set_family_sharing','As the currently authenticated owner, grant or revoke one member a specific read scope.',{
+      granteeId:z.string().min(1),scope:z.enum(['overview','health_trends']),enabled:z.boolean()
+    },args=>family.setSharing(principal,args.granteeId,args.scope,args.enabled));
+    ftool('get_family_overview','Read a member limited overview only if their permission is granted.',{
+      memberId:z.string().min(1)
+    },args=>family.getOverview(principal,args.memberId));
   }
 
   mcp.registerTool('get_agent_workflow', {
@@ -198,14 +224,14 @@ function createMcpServer() {
     "snapshot",
     "telemetry://snapshot",
     { description: "今日档位、宏量配额与已摄入、生物遥测、7 日预测、补剂、TDEE 校准诊断的全量快照", mimeType: "application/json" },
-    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(engine.buildSnapshot(), null, 1) }] })
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(memberEngine.buildSnapshot(), null, 1) }] })
   );
 
   return mcp;
 }
 
 // Optional remote MCP, isolated from the Dashboard HTTP listener.
-startRemoteMcp({makeServer:createMcpServer,log});
+startRemoteMcp({makeServer:createMcpServer,resolvePrincipal:family ? family.forToken : null,log});
 
 if (USE_STDIO) {
   const mcp=createMcpServer();
