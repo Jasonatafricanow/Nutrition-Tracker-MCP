@@ -6,7 +6,7 @@
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-303633?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/) [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-stdio-303633?style=flat-square)](https://modelcontextprotocol.io/) ![Storage](https://img.shields.io/badge/SQLite-local--first-303633?style=flat-square) ![Status](https://img.shields.io/badge/status-portfolio%20prototype-B53A27?style=flat-square)
 
-**[Preview](#interface-preview) · [Quick start](#quick-start) · [Architecture](#architecture) · [MCP tools](#mcp-integration) · [Design decisions](#engineering-notes)**
+**[Preview](#interface-preview) · [Quick start](#quick-start) · [中文部署与 Agent 接入手册](docs/INSTALL_AND_AGENT_SETUP_ZH.md) · [Architecture](#architecture) · [MCP tools](#mcp-integration) · [Design decisions](#engineering-notes)**
 
 </div>
 
@@ -125,7 +125,7 @@ Tokens must be kept private; do not commit them to Git. The local browser dashbo
 **Requirements:** Node.js **22.13+**, npm. The project uses the built-in `node:sqlite` module. No API keys, cloud service, database server, or frontend build are required.
 
 ```bash
-git clone https://github.com/Jasonatafricanow/Nutrition-Tracker-MCP.git
+git clone --branch experiment/agent-first-quick-log --single-branch https://github.com/Jasonatafricanow/Nutrition-Tracker-MCP.git
 cd Nutrition-Tracker-MCP
 npm ci
 npm run demo
@@ -179,6 +179,9 @@ Nutrition-Tracker-MCP/
 ```
 
 ## MCP integration
+
+**For step-by-step installation, Windows/macOS/Linux examples, Claude Desktop, Claude Code, Cursor and Codex connection instructions, see the [Chinese deployment and Agent connection guide](docs/INSTALL_AND_AGENT_SETUP_ZH.md).** Clone the experimental branch: these features are not on `main` yet.
+
 
 **Primary operating path:** connect your agent as an MCP client. The dashboard is optional for monitoring and review.
 
