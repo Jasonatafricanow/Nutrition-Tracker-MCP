@@ -74,7 +74,16 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
     if(note!=null&&(typeof note!=='string'||note.length>500))throw Error('note too long');
     if(sourceEventId!=null&&(!/^[\w.:\-]{1,120}$/.test(sourceEventId)))throw Error('invalid source event ID');
     const date=dayInZone(dateTime,m.timeZone);
-    if(sourceEventId){const prev=database.prepare('SELECT id FROM observations WHERE member_id=? AND source_event_id=?').get(memberId,sourceEventId);if(prev)return {ok:true,id:prev.id,duplicate:true};}
+    if(sourceEventId){
+      const prev=database.prepare('SELECT * FROM observations WHERE member_id=? AND source_event_id=?').get(memberId,sourceEventId);
+      if(prev){
+        const normalized={kind,systolic:kind==='blood_pressure'?systolic:null,diastolic:kind==='blood_pressure'?diastolic:null,
+          value:['temperature_c','glucose_mg_dl'].includes(kind)?value:null,note:note??null};
+        if(Object.entries(normalized).some(([key,v])=>prev[key]!==v)|| (observedAt&&prev.observed_at!==dateTime.toISOString()))
+          throw Error('sourceEventId already used for different health observation');
+        return {ok:true,id:prev.id,duplicate:true};
+      }
+    }
     const id=randomUUID();
     database.prepare('INSERT INTO observations VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,memberId,dateTime.toISOString(),date,kind,kind==='blood_pressure'?systolic:null,kind==='blood_pressure'?diastolic:null,['temperature_c','glucose_mg_dl'].includes(kind)?value:null,note??null,sourceEventId??null);
     return {ok:true,id,memberId,kind,date,duplicate:false};
@@ -110,9 +119,9 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
           targets:snapshot.targets}:null,
         latest:{weightKg:today.scale_weight_kg??null,weightTrendKg:snapshot.profile.ewma_weight_kg??null,
           sleepHours:recentSleep?.sleep_hours??null,sleepDate:recentSleep?.date??null,
-          deepSleepPct:latestWith('deep_sleep_pct')?.deep_sleep_pct??null,restingHeartRate:recentRhr?.rhr_bpm??null,
-          hrvMs:latestWith('hrv_ms')?.hrv_ms??null,hrvMetric:latestWith('hrv_ms')?.hrv_metric??null,
-          steps:latestWith('steps')?.steps??null,activeKcal:latestWith('active_kcal')?.active_kcal??null,
+          deepSleepPct:latestWith('deep_sleep_pct')?.deep_sleep_pct??null,deepSleepDate:latestWith('deep_sleep_pct')?.date??null,restingHeartRate:recentRhr?.rhr_bpm??null,restingHeartRateDate:recentRhr?.date??null,
+          hrvMs:latestWith('hrv_ms')?.hrv_ms??null,hrvMetric:latestWith('hrv_ms')?.hrv_metric??null,hrvDate:latestWith('hrv_ms')?.date??null,
+          steps:latestWith('steps')?.steps??null,stepsDate:latestWith('steps')?.date??null,activeKcal:latestWith('active_kcal')?.active_kcal??null,activeKcalDate:latestWith('active_kcal')?.date??null,
           recoveryObservation:today.cns_status??null,
           bloodPressure:lastByKind.blood_pressure?{systolic:lastByKind.blood_pressure.systolic,diastolic:lastByKind.blood_pressure.diastolic,date:lastByKind.blood_pressure.date}:null,
           temperatureC:lastByKind.temperature_c?{value:lastByKind.temperature_c.value,date:lastByKind.temperature_c.date}:null,

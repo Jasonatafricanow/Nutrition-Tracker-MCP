@@ -11,7 +11,7 @@ const READ_GROUPS = {
   extras: ['save_meal_template','log_meal_template','update_supplement_stack','add_food_to_library']
 };
 const OPERATIONS = Object.freeze({
-  meal:'log_meal_items', checkin:'log_morning_checkin', correction:'update_meal_item',
+  meal:'log_meal_items', quick_meal:'log_estimated_meal', checkin:'log_morning_checkin', correction:'update_meal_item',
   photo_stage:'stage_photo_estimate', photo_confirm:'confirm_photo_meal', photo_discard:'discard_photo_meal',
   template_save:'save_meal_template', template_log:'log_meal_template',
   supplement:'update_supplement_stack', plan:'set_day_context', profile:'set_profile',
@@ -38,8 +38,8 @@ export function createAgentInterface({engine,household=null,usda=null}={}){
      }
      if(['daily','health','all'].includes(focus)){
        base.health=clean({sleepHours:m.latest.sleepHours,sleepDate:m.latest.sleepDate,
-         restingHeartRate:m.latest.restingHeartRate,recoveryObservation:m.latest.recoveryObservation,hrvMs:m.latest.hrvMs,hrvMetric:m.latest.hrvMetric,
-         deepSleepPct:m.latest.deepSleepPct,steps:m.latest.steps,activeKcal:m.latest.activeKcal,
+         restingHeartRate:m.latest.restingHeartRate,restingHeartRateDate:m.latest.restingHeartRateDate,recoveryObservation:m.latest.recoveryObservation,hrvMs:m.latest.hrvMs,hrvMetric:m.latest.hrvMetric,hrvDate:m.latest.hrvDate,
+         deepSleepPct:m.latest.deepSleepPct,deepSleepDate:m.latest.deepSleepDate,steps:m.latest.steps,stepsDate:m.latest.stepsDate,activeKcal:m.latest.activeKcal,activeKcalDate:m.latest.activeKcalDate,
          weightKg:m.latest.weightKg,weightTrendKg:m.latest.weightTrendKg,
          bloodPressure:m.latest.bloodPressure,temperatureC:m.latest.temperatureC,glucoseMgDl:m.latest.glucoseMgDl});
        base.noteworthy=m.noteworthy.slice(0,2);
@@ -103,9 +103,9 @@ export function createAgentInterface({engine,household=null,usda=null}={}){
  }
  function execute({memberId,operation,args={},tool,includeContext=true}={}){
    const afterWrite=(out)=>{
-     if(!includeContext||!['meal','checkin','health_observation','correction'].includes(operation))return out;
+     if(!includeContext||!['meal','quick_meal','checkin','health_observation','correction'].includes(operation))return out;
      if(household){const r=household.context({days:3,memberId});
-       const c=projectHousehold(r,operation==='meal'||operation==='correction'?'food':'health');
+       const c=projectHousehold(r,operation==='meal'||operation==='quick_meal'||operation==='correction'?'food':'health');
        return {...out,context:c.members[0]};
      }
      const x=engine.execute('get_agent_context',{},'MCP_COMPACT');

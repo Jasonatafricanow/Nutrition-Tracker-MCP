@@ -2,7 +2,7 @@
 
 # Nutrition Tracker MCP
 
-**An agent-first nutrition MCP server with persistent food logging, reusable meals, and a read-only monitoring dashboard.**
+**An agent-first nutrition MCP server with quick, traceable meal logging, reusable meals, and an optional review-and-correction dashboard.**
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-303633?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/) [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-stdio-303633?style=flat-square)](https://modelcontextprotocol.io/) ![Storage](https://img.shields.io/badge/SQLite-local--first-303633?style=flat-square) ![Status](https://img.shields.io/badge/status-portfolio%20prototype-B53A27?style=flat-square)
 
@@ -11,6 +11,16 @@
 </div>
 
 ---
+
+## Product direction: easy to record, easy to correct
+
+**Default user: an ordinary person developing a healthy habit, not a competitive athlete or a clinical patient.** Aim for one conversational turn to log a meal or daily observation. Agent estimates are acceptable when clearly labeled; save provenance and make corrections easy in chat and the Dashboard. Advanced carb cycling/TDEE remains opt-in, not an onboarding hurdle. The strict photo-review flow remains available, but should not be compulsory for casual records.
+
+**[产品转向决策记录：为什么主动容忍合理误差](docs/PRODUCT_STRATEGY_AGENT_FIRST_ZH.md)** — documents the tradeoff between single-entry accuracy, user effort, continuity, traceability, correction, and real Agent evaluation.
+
+## Interface strategy: professional first, reversible simplification
+
+The Dashboard initially exposes existing professional nutrition, recovery and trend views. Users can switch to a simpler everyday view at any time **without deleting data or changing the underlying calculations**. This is a voluntary presentation preference: do not automatically infer user disengagement or apply a clinical/programmatic downgrade. Everyday tracking still supports fast meals, sleep, weight and activity. For meal text the Agent may save an explicitly labeled estimate in one user turn; **for meal photos it must first show a brief food-identification and portion preview and obtain one combined approval before saving**. See [the product pivot decision](docs/PRODUCT_STRATEGY_AGENT_FIRST_ZH.md).
 
 ## Current development: lightweight family NAS + compact Agent MCP
 
@@ -28,7 +38,7 @@ The current `main` implementation rebuilds household features **from the pre-fam
 - **Food + logging:** “150g cooked rice and 180g chicken for Alex.” → batched `nutrition_query({view:"foods",memberId:"alex",queries:["cooked rice","chicken"]})` → verify food IDs and preparation → `nutrition_execute({operation:"meal",memberId:"alex",args:{mealSlot:"午餐",items:[...],requestId:"unique-meal"}})`.
 - **Photo intake:** photo compiler MCP Prompt only on photo turns → ingredient matching → unconfirmed draft → user approval → confirmed write. Do not silently invent grams/macros.
 
-The compact tool catalog reduces repeated model tool-selection context, but real Agent accuracy must still be evaluated from conversation traces. The optional Dashboard adds a read-only family summary; it is not the primary workflow.
+The compact tool catalog reduces repeated model tool-selection context, but real Agent accuracy must still be evaluated from conversation traces. The optional Dashboard adds a family overview with on-demand per-member meal correction; it is not the primary workflow.
 
 ---
 

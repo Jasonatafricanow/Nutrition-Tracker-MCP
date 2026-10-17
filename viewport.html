@@ -149,6 +149,8 @@
     details[open] > summary::before { content: "− "; }
     details > summary:hover { color: var(--ink); }
 
+    /* 低门槛视图只调整展示，不改变专业数据和计划 */
+    body.everyday-view .advanced-only { display: none !important; }
     /* 补剂 */
     .supp { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 0; border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left; cursor: pointer; }
     .supp:first-child { border-top: 1px solid var(--rule); }
@@ -227,6 +229,7 @@
         <span>今日消耗目标 <b id="m-target-tdee">—</b></span>
         <span>体重 <b id="m-scale">—</b> · 趋势 <b id="m-ewma">—</b></span>
         <span id="m-demo" class="hidden alert">演示数据</span>
+        <span><button type="button" class="linkbtn" id="view-mode-toggle" onclick="toggleViewMode()" aria-pressed="false">切换到日常视图</button></span>
       </div>
     </header>
     <div class="ticker reveal" style="--i:1"><span id="evt-time">—</span><span id="evt-summary">等待数据</span></div>
@@ -252,7 +255,7 @@
         <dl class="kv" id="kv"></dl>
         <p class="advice" id="advice"></p>
         <div class="focus" id="focus"></div>
-        <div class="seg" role="group" aria-label="切换今日档位">
+        <div class="seg advanced-only" role="group" aria-label="切换今日档位">
           <button data-level="high" onclick="setLevel('high')">高碳</button>
           <button data-level="medium" onclick="setLevel('medium')">中碳</button>
           <button data-level="low" onclick="setLevel('low')">低碳</button>
@@ -289,14 +292,14 @@
           </table>
         </div>
       </div>
-      <div class="c5 reveal" style="--i:5">
+      <div class="c5 reveal advanced-only" style="--i:5">
         <div class="sec-head"><h2><i>iv.</i>补剂</h2><span class="aside" id="supp-count"></span></div>
         <div id="supp-list"></div>
       </div>
     </section>
 
     <!-- 本周 -->
-    <section class="reveal" style="--i:6">
+    <section class="reveal advanced-only" style="--i:6">
       <div class="sec-head"><h2><i>v.</i>本周计划与体重预测</h2><span class="aside">点击某天切换周模板档位</span></div>
       <div class="week" id="week"></div>
       <div class="chart">
@@ -311,7 +314,7 @@
 
     <!-- 校准 + 账本 -->
     <section class="grid">
-      <div class="c5 reveal" style="--i:7">
+      <div class="c5 reveal advanced-only" style="--i:7">
         <div class="sec-head"><h2><i>vi.</i>代谢校准</h2><span class="aside">阻尼 0.35 · 单步 ±120</span></div>
         <dl class="figs" id="figs"></dl>
         <p class="note" id="cal-note"></p>
@@ -348,7 +351,7 @@
           </form>
         </details>
 
-        <details id="pf-details">
+        <details id="pf-details" class="advanced-only">
           <summary>档案、阶段目标与供能比</summary>
           <form id="profile-form" style="margin: 4px 0 16px">
             <div class="form-row profile-grid">
@@ -393,7 +396,7 @@
           </form>
         </details>
       </div>
-      <div class="c5 reveal" style="--i:10">
+      <div class="c5 reveal advanced-only" style="--i:10">
         <div class="sec-head"><h2><i>ix.</i>调用日志</h2></div>
         <div class="journal" id="journal"></div>
       </div>
@@ -409,6 +412,21 @@
 
   <script>
     const LV = { high: "高碳日", medium: "中碳日", low: "低碳日" };
+    // First impression is a capable professional workspace. Simplification is a voluntary
+    // reversible display preference, NOT a downgrade of recorded health data or engine.
+    let everydayView=false;
+    try { everydayView=localStorage.getItem('nutrition.viewMode')==='everyday'; } catch {}
+    function applyViewMode() {
+      document.body.classList.toggle('everyday-view',everydayView);
+      const button=document.getElementById('view-mode-toggle');
+      if(button){button.textContent=everydayView?'切换到专业视图':'切换到日常视图';
+        button.setAttribute('aria-pressed',String(everydayView));}
+    }
+    function toggleViewMode(){
+      everydayView=!everydayView;applyViewMode();
+      try {localStorage.setItem('nutrition.viewMode',everydayView?'everyday':'professional');}catch{}
+    }
+    applyViewMode();
     const LV_SHORT = { high: "高", medium: "中", low: "低" };
     const NEXT = { low: "medium", medium: "high", high: "low" };
     const STATE = { OPTIMAL: ["状态良好", "ok"], CAUTION: ["轻度疲劳", "caution"], OVERRIDE_REST: ["熔断 · 强制恢复", "alert"] };
@@ -440,11 +458,11 @@
       }
       return csrfToken;
     }
-    async function dispatch(tool, args = {}) {
+    async function dispatch(tool, args = {}, memberId) {
       if (!connected) return toast("未连接服务端，操作未执行");
       try {
         const csrf = await sessionToken();
-        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json", "X-Nutrition-CSRF":csrf }, body: JSON.stringify({ tool, args }) });
+        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json", "X-Nutrition-CSRF":csrf }, body: JSON.stringify({ tool, args, ...(memberId?{memberId}:{}) }) });
         const body = await r.json();
         if (!r.ok) toast(body.error || `请求失败 ${r.status}`);
         return body;
@@ -518,13 +536,13 @@
       $("meal-tbody").innerHTML = s.meals.length ? s.meals.map((m) => `
         <tr>
           <td class="muted">${esc(m.slot)}</td>
-          <td>${esc(m.name)}</td>
+          <td>${esc(m.name)}${m.source_kind?.includes('estimate')?' <small class="muted">· 估算</small>':''}</td>
           <td class="r">${m.weight_g}</td>
           <td class="r">${m.p}</td>
           <td class="r">${m.c}</td>
           <td class="r">${m.f}</td>
           <td class="r"><b>${kcalOf(m)}</b></td>
-          <td class="r"><button class="linkbtn" onclick="delMeal('${esc(m.id)}')" aria-label="删除 ${esc(m.name)}">删除</button></td>
+          <td class="r"><button class="linkbtn" onclick="editMeal('${esc(m.id)}',${m.revision??0},${m.weight_g})" aria-label="校准 ${esc(m.name)}">校准</button> <button class="linkbtn" onclick="delMeal('${esc(m.id)}')" aria-label="删除 ${esc(m.name)}">删除</button></td>
         </tr>`).join("") : `<tr><td colspan="8" class="muted" style="padding:24px 0">今天还没有记录。选一样食材、填克重，点"记录"。</td></tr>`;
       fillSelect($("meal-slot"), s.mealSlots.map((x) => [x, x]));
       fillSelect($("food-select"), s.foods.map((f) => [f.id, `${f.name}　${Math.round(f.p * 4 + f.c * 4 + f.f * 9)} 千卡 · 蛋白 ${f.p} 碳水 ${f.c} 脂肪 ${f.f}`]));
@@ -675,6 +693,15 @@
     const cycleDay = (dayIndex, plan) => dispatch("update_weekly_schedule", { dayIndex, plan });
     const toggleSupp = (supplementId, taken) => dispatch("update_supplement_stack", { supplementId, taken });
     const delMeal = (mealId) => dispatch("delete_meal_item", { mealId });
+    async function editMeal(mealId,expectedRevision,currentGrams) {
+      const typed=prompt("修改食物估算份量（克），保留原记录和修改历史",String(currentGrams));
+      if(typed===null)return;
+      const weightGrams=Number(typed);
+      if(!Number.isFinite(weightGrams)||weightGrams<=0||weightGrams>5000)return toast("请输入合理的克重");
+      const requestId="ui-edit-"+Date.now()+"-"+Math.random().toString(36).slice(2);
+      const result=await dispatch("update_meal_item",{mealId,expectedRevision,requestId,weightGrams,portionSource:"user_estimate"});
+      if(result?.ok)toast("份量已校准，历史修改记录已保留");
+    }
     async function calibrate() {
       const r = await dispatch("calibrate_metabolic_tdee", { windowDays: 14 });
       toast(r?.ok ? r.diagnosticNote : (r?.reason || "无法计算校准"));
@@ -724,6 +751,28 @@
       }
     });
 
+    async function loadHouseholdMeals(memberId) {
+      const container=$('household-meals-'+memberId);
+      if(!container)return;
+      try{
+        const response=await fetch('/api/household?view=meals&memberId='+encodeURIComponent(memberId));
+        if(!response.ok)throw Error('无法读取');
+        const history=await response.json();
+        container.innerHTML=history.meals?.length ? history.meals.map(m=>
+          `<div style="margin:7px 0"><span>${esc(m.name)} · ${m.weight_g}g${m.source_kind?.includes('estimate')?'（估算）':''}</span>
+             <button type="button" class="linkbtn" onclick="editHouseholdMeal('${esc(memberId)}','${esc(m.id)}',${m.revision??0},${m.weight_g})">校准</button></div>`
+        ).join(''):'今日暂无餐食';
+      }catch{container.textContent='无法读取今日餐食';}
+    }
+    async function editHouseholdMeal(memberId,mealId,expectedRevision,currentGrams) {
+      const raw=prompt("更正这条餐食的克重（保留修改历史）",String(currentGrams));
+      if(raw===null)return;
+      const weightGrams=Number(raw);
+      if(!Number.isFinite(weightGrams)||weightGrams<=0||weightGrams>5000)return toast('请输入有效克重');
+      const requestId='family-ui-edit-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+      const result=await dispatch('update_meal_item',{mealId,expectedRevision,requestId,weightGrams,portionSource:'user_estimate'},memberId);
+      if(result?.ok){await loadHouseholdMeals(memberId);toast('已更正，保留历史');}
+    }
     async function refreshHousehold() {
       try {
         const res=await fetch('/api/household');
@@ -743,7 +792,10 @@
           const notes=(m.noteworthy||[]).slice(0,1).map(v=>v.observation).join('；');
           return `<article class="household-card"><h3>${esc(m.name)} <small>${m.mode==='performance'?'运动营养':'日常观察'}</small></h3>
             <div class="mini">${fields.map(([a,b])=>`<div><span>${esc(a)}</span> ${esc(b)}</div>`).join('')}</div>
-            ${notes?`<p>${esc(notes)}</p>`:''}</article>`;
+            ${notes?`<p>${esc(notes)}</p>`:''}
+            <details><summary onclick="loadHouseholdMeals('${esc(m.memberId)}')">查看今日餐食 · 校准</summary>
+              <div id="household-meals-${esc(m.memberId)}" class="small muted">点击加载</div>
+            </details></article>`;
         }).join('');
       } catch {} // A secondary panel should never break personal nutrition UI
     }
