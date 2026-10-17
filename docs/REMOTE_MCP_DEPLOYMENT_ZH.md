@@ -1,6 +1,6 @@
 # Nutrition Tracker：远程 Streamable HTTP MCP 部署说明
 
-**分支：`feature/remote-streamable-http-mcp`。** 此分支从 Agent-first 实验分支继续开发，包含照片编译、饮食账本、USDA 搜索和 Agent 工作流；stdio 依然可用。
+**正式主线：`main`。** 当前主线已经合并远程 MCP、照片编译、饮食账本、USDA 搜索和 Agent 工作流；stdio 依然可用。
 
 ## 设计边界
 
@@ -14,7 +14,7 @@
 ## 1. 直接本地冒烟测试
 
 ```bash
-git clone --branch feature/remote-streamable-http-mcp --single-branch https://github.com/Jasonatafricanow/Nutrition-Tracker-MCP.git
+git clone https://github.com/Jasonatafricanow/Nutrition-Tracker-MCP.git
 cd Nutrition-Tracker-MCP
 npm ci
 npm test
