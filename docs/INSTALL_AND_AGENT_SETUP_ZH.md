@@ -1,6 +1,6 @@
 # Nutrition Tracker MCP — 安装、部署与 Agent 连接指南
 
-> 当前说明适用于 GitHub 分支 **`experiment/agent-first-quick-log`（v5.2-alpha）**，不是尚未合并的 `main` 版本。本项目是 **Agent-first MCP 工具服务**：聊天中的 Agent 执行识别、查询、确认和工具调用；`engine.js` 负责确定性计算与 SQLite 持久化；Dashboard 只用于监控与回顾。
+> 当前说明适用于已经合并 Agent-first、照片编译和远程 MCP 能力的 GitHub **`main` 分支**。本项目是 **Agent-first MCP 工具服务**：聊天中的 Agent 执行识别、查询、确认和工具调用；`engine.js` 负责确定性计算与 SQLite 持久化；Dashboard 只用于监控与回顾。
 
 ## 1. 前置条件与下载
 
@@ -11,14 +11,14 @@
 PowerShell / macOS / Linux 终端：
 
 ```bash
-git clone --branch experiment/agent-first-quick-log --single-branch https://github.com/Jasonatafricanow/Nutrition-Tracker-MCP.git
+git clone https://github.com/Jasonatafricanow/Nutrition-Tracker-MCP.git
 cd Nutrition-Tracker-MCP
 node --version
 npm ci
 npm test
 ```
 
-**注意：必须切到实验分支。** 直接 `git clone` 默认取得 `main`，不包含这次的 Agent-first 快捷记录和照片编译等实验功能。
+**注意：** Agent-first 功能已合并到 `main`，无需再切换实验分支。远程 Streamable HTTP MCP 部署见 [远程 MCP / NAS 指南](REMOTE_MCP_DEPLOYMENT_ZH.md)。
 
 ## 2. 先在本机检查 Dashboard（可选）
 
