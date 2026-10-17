@@ -91,7 +91,7 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
   const observations=(memberId,days=14)=>{
     const m=member(memberId);if(!Number.isInteger(days)||days<1||days>90)throw Error('days must be 1..90');
     const end=dayInZone(now(),m.timeZone),start=shiftDay(end,-days+1);
-    return database.prepare('SELECT date,kind,systolic,diastolic,value,note FROM observations WHERE member_id=? AND date BETWEEN ? AND ? ORDER BY date DESC LIMIT 100').all(memberId,start,end);
+    return database.prepare('SELECT date,kind,systolic,diastolic,value,note FROM observations WHERE member_id=? AND date BETWEEN ? AND ? ORDER BY observed_at DESC, id DESC LIMIT 100').all(memberId,start,end);
   };
   function context({days=14,memberId}={}){
     if(memberId)member(memberId);
@@ -103,8 +103,9 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
       const lastByKind={};for(const v of obs)if(lastByKind[v.kind]===undefined)lastByKind[v.kind]=v;
       const recent=rows.filter(r=>r.date>=shiftDay(snapshot.date,-1));
       const latestWith=key=>rows.toReversed().find(r=>r[key]!=null);
-      const recentSleep=recent.find(r=>r.sleep_hours!=null);
-      const recentRhr=recent.find(r=>r.rhr_bpm!=null);
+      // Rows are sorted old → new. Use the most recent, not yesterday's first hit.
+      const recentSleep=recent.toReversed().find(r=>r.sleep_hours!=null);
+      const recentRhr=recent.toReversed().find(r=>r.rhr_bpm!=null);
       const priorRhr=rows.filter(r=>r.rhr_bpm!=null&&r.date<recentRhr?.date).map(r=>r.rhr_bpm);
       const active=[];
       if(recentSleep&&recentSleep.sleep_hours<6)active.push({key:'short_sleep',observation:`最近记录睡眠 ${recentSleep.sleep_hours} 小时`,date:recentSleep.date});
@@ -117,7 +118,8 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
         nutrition:m.mode==='performance'?{carbLevel:today.carb_level,training:!!today.is_training_day,
           remaining:{kcal:Math.round(snapshot.targets.kcal-today.intake_kcal),p:Math.round(snapshot.targets.p-today.p_g),c:Math.round(snapshot.targets.c-today.c_g),f:Math.round(snapshot.targets.f-today.f_g)},
           targets:snapshot.targets}:null,
-        latest:{weightKg:today.scale_weight_kg??null,weightTrendKg:snapshot.profile.ewma_weight_kg??null,
+        latest:{weightKg:latestWith('scale_weight_kg')?.scale_weight_kg??null,weightDate:latestWith('scale_weight_kg')?.date??null,
+          weightTrendKg:snapshot.profile.ewma_weight_kg??null,
           sleepHours:recentSleep?.sleep_hours??null,sleepDate:recentSleep?.date??null,
           deepSleepPct:latestWith('deep_sleep_pct')?.deep_sleep_pct??null,deepSleepDate:latestWith('deep_sleep_pct')?.date??null,restingHeartRate:recentRhr?.rhr_bpm??null,restingHeartRateDate:recentRhr?.date??null,
           hrvMs:latestWith('hrv_ms')?.hrv_ms??null,hrvMetric:latestWith('hrv_ms')?.hrv_metric??null,hrvDate:latestWith('hrv_ms')?.date??null,

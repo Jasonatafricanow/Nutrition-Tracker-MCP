@@ -41,7 +41,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
        base.health=clean({sleepHours:m.latest.sleepHours,sleepDate:m.latest.sleepDate,
          restingHeartRate:m.latest.restingHeartRate,restingHeartRateDate:m.latest.restingHeartRateDate,recoveryObservation:m.latest.recoveryObservation,hrvMs:m.latest.hrvMs,hrvMetric:m.latest.hrvMetric,hrvDate:m.latest.hrvDate,
          deepSleepPct:m.latest.deepSleepPct,deepSleepDate:m.latest.deepSleepDate,steps:m.latest.steps,stepsDate:m.latest.stepsDate,activeKcal:m.latest.activeKcal,activeKcalDate:m.latest.activeKcalDate,
-         weightKg:m.latest.weightKg,weightTrendKg:m.latest.weightTrendKg,
+         weightKg:m.latest.weightKg,weightDate:m.latest.weightDate,weightTrendKg:m.latest.weightTrendKg,
          bloodPressure:m.latest.bloodPressure,temperatureC:m.latest.temperatureC,glucoseMgDl:m.latest.glucoseMgDl});
        base.noteworthy=m.noteworthy.slice(0,2);
      }
