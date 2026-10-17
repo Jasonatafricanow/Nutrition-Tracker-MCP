@@ -13,6 +13,7 @@ import { PHOTO_ESTIMATION_PROMPT } from "./photo-estimation.js";
 import { AGENT_WORKFLOW, AGENT_WORKFLOW_VERSION } from "./agent-workflow.js";
 import { createUSDAClient } from "./usda-foods.js";
 import { z } from "zod";
+import { startRemoteMcp } from "./remote-mcp.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = process.argv.includes("--demo");
@@ -145,8 +146,8 @@ setInterval(() => {
 }, 60_000).unref();
 
 // ==================== MCP ====================
-if (USE_STDIO) {
-  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.2.0-alpha.3" });
+function createMcpServer() {
+  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.3.0-beta.1" });
 
   for (const [name, def] of Object.entries(TOOL_DEFS)) {
     mcp.registerTool(name, { description: def.description, inputSchema: def.shape }, async (args) => {
@@ -200,6 +201,14 @@ if (USE_STDIO) {
     async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(engine.buildSnapshot(), null, 1) }] })
   );
 
+  return mcp;
+}
+
+// Optional remote MCP, isolated from the Dashboard HTTP listener.
+startRemoteMcp({makeServer:createMcpServer,log});
+
+if (USE_STDIO) {
+  const mcp=createMcpServer();
   await mcp.connect(new StdioServerTransport());
   // MCP 客户端退出后不要留下占着端口的孤儿进程
   process.stdin.on("close", () => process.exit(0));

@@ -6,7 +6,7 @@
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-303633?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/) [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-stdio-303633?style=flat-square)](https://modelcontextprotocol.io/) ![Storage](https://img.shields.io/badge/SQLite-local--first-303633?style=flat-square) ![Status](https://img.shields.io/badge/status-portfolio%20prototype-B53A27?style=flat-square)
 
-**[Preview](#interface-preview) · [Quick start](#quick-start) · [中文部署与 Agent 接入手册](docs/INSTALL_AND_AGENT_SETUP_ZH.md) · [Architecture](#architecture) · [MCP tools](#mcp-integration) · [Design decisions](#engineering-notes)**
+**[Remote MCP deployment (中文)](docs/REMOTE_MCP_DEPLOYMENT_ZH.md) · [Preview](#interface-preview) · [Quick start](#quick-start) · [Architecture](#architecture) · [MCP tools](#mcp-integration) · [Design decisions](#engineering-notes)**
 
 </div>
 
@@ -125,7 +125,7 @@ Tokens must be kept private; do not commit them to Git. The local browser dashbo
 **Requirements:** Node.js **22.13+**, npm. The project uses the built-in `node:sqlite` module. No API keys, cloud service, database server, or frontend build are required.
 
 ```bash
-git clone --branch experiment/agent-first-quick-log --single-branch https://github.com/Jasonatafricanow/Nutrition-Tracker-MCP.git
+git clone https://github.com/Jasonatafricanow/Nutrition-Tracker-MCP.git
 cd Nutrition-Tracker-MCP
 npm ci
 npm run demo
@@ -178,10 +178,11 @@ Nutrition-Tracker-MCP/
 └── .github/workflows/ci.yml    # Reproducible test workflow
 ```
 
+## Remote MCP (optional)
+
+The experimental branch adds **authenticated Streamable HTTP MCP** on a separate `MCP_HTTP_PORT` (default 3457), while retaining local stdio and keeping Dashboard HTTP private. Remote MCP is **disabled by default**. It requires `MCP_HTTP_ENABLED=1`, a strong `MCP_HTTP_TOKEN`, TLS reverse proxy for off-machine access, and strict Host/Origin allowlists. No OAuth or multi-user isolation is provided. **See the [Chinese remote MCP / NAS deployment guide](docs/REMOTE_MCP_DEPLOYMENT_ZH.md)** for Docker Compose, Caddy, credentials, and Agent connection settings.
+
 ## MCP integration
-
-**For step-by-step installation, Windows/macOS/Linux examples, Claude Desktop, Claude Code, Cursor and Codex connection instructions, see the [Chinese deployment and Agent connection guide](docs/INSTALL_AND_AGENT_SETUP_ZH.md).** Clone the experimental branch: these features are not on `main` yet.
-
 
 **Primary operating path:** connect your agent as an MCP client. The dashboard is optional for monitoring and review.
 
