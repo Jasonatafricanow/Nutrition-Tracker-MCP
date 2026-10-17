@@ -18,6 +18,10 @@
 
 **[产品转向决策记录：为什么主动容忍合理误差](docs/PRODUCT_STRATEGY_AGENT_FIRST_ZH.md)** — documents the tradeoff between single-entry accuracy, user effort, continuity, traceability, correction, and real Agent evaluation.
 
+## Interface strategy: professional first, reversible simplification
+
+The Dashboard initially exposes existing professional nutrition, recovery and trend views. Users can switch to a simpler everyday view at any time **without deleting data or changing the underlying calculations**. This is a voluntary presentation preference: do not automatically infer user disengagement or apply a clinical/programmatic downgrade. Everyday tracking still supports fast meals, sleep, weight and activity. For meal text the Agent may save an explicitly labeled estimate in one user turn; **for meal photos it must first show a brief food-identification and portion preview and obtain one combined approval before saving**. See [the product pivot decision](docs/PRODUCT_STRATEGY_AGENT_FIRST_ZH.md).
+
 ## Current development: lightweight family NAS + compact Agent MCP
 
 The current `main` implementation rebuilds household features **from the pre-family v5.3 baseline**. The household is the trusted boundary; member IDs label data, not accounts. No family SaaS login, per-member Bearer tokens or repeated sharing consent flows. Two default MCP tools replace the exposed dozens of low-level operations; the existing nutrition engine remains authoritative. Full legacy tools are available only with `MCP_TOOL_SURFACE=full` for migration.

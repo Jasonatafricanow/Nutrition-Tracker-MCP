@@ -304,11 +304,11 @@ export const TOOL_DEFS = {
     }
   },
   log_estimated_meal: {
-    description: "普通用户一句话/照片明确要求记餐时，允许估算直接入账。保存来源、估算份量及审计记录；勿把估算称为实测。严格照片审核仍可选用。",
+    description: "文字描述明确要求记餐时，允许估算直接入账且可修改；照片需要先展示识别种类与估算份量，用户确认一次后再调用已有照片入账流程。",
     shape: {
       mealSlot: z.enum(MEAL_SLOTS),
       date: calendarDate.optional(),
-      source: z.enum(["text","photo"]),
+      source: z.literal("text").describe("文字描述的近似记录；照片默认需要一次识别结果确认"),
       requestId: z.string().trim().min(1).max(128).describe("这次记录的稳定 ID；网络重试使用同一个"),
       items: z.array(z.object({
         name: z.string().trim().min(1).max(120),
@@ -1126,8 +1126,8 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
           macros={p:it.p,c:it.c,f:it.f};
         }
         return {name:it.name,w:it.weightGrams,...macros,
-          sourceKind:a.source==='photo'?'agent_photo_estimate':'agent_text_estimate',
-          portionSource:a.source==='photo'?'visual_estimate':'user_estimate'};
+          sourceKind:'agent_text_estimate',
+          portionSource:'user_estimate'};
       });
       const result=commitMeal({toolName:"log_estimated_meal",requestId:a.requestId,payload:a,date,slot:a.mealSlot,rows});
       return {result:{...result,estimated:true,provenance:a.source,editable:true},

@@ -31,9 +31,15 @@
 
 5. Agent 连接同一个 URL 和 NAS Bearer Token，使用两个默认工具：`nutrition_query` 与 `nutrition_execute`。**已有使用老工具名的 Agent** 可以暂时将 `MCP_TOOL_SURFACE=full` 开启兼容模式；完成 Agent 提示词迁移后改回默认 compact。
 
+## 交互深度
+
+默认保留可见的专业健康／营养能力，Dashboard 可切换「日常视图」，不删除任何记录，随时恢复专业视图。这是浏览器端展示偏好，不会自动修改成员模式、TDEE 或历史记录。
+
+普通文字记餐可使用 `quick_meal` 直接记录估算值；**照片必须先向用户展示识别种类与大致份量并得到一次整体确认**，再以原有 `photo_stage` / `photo_confirm` 写入。不要为照片中每种食物分别追问。
+
 ## 两个工具的日常用法
 
-- 普通用户默认一句话记餐：`nutrition_execute({memberId:'adult_a',operation:'quick_meal',args:{mealSlot:'午餐',source:'text',items:[{name:'米饭',weightGrams:150,foodId:'f7'}],requestId:'unique-meal-event'}})`，注明估算、可改。不必逐项确认估重。照片在用户明确要求记录时也可 `source:'photo'`；严格照片草稿确认仍可选。
+- 普通用户默认一句话记餐：`nutrition_execute({memberId:'adult_a',operation:'quick_meal',args:{mealSlot:'午餐',source:'text',items:[{name:'米饭',weightGrams:150,foodId:'f7'}],requestId:'unique-meal-event'}})`，注明估算、可改。不必逐项确认估重。照片不能走 `quick_meal` 直写；识别预览后一轮确认，底层复用原有草稿与确认操作。
 - 家庭晚餐：`nutrition_query({view:'household',focus:'food'})` 一次读取成员健身营养目标及每日剩余额度，Agent 对同桌菜品建议个性化份量；普通模式成员不会被强加高低碳计划。
 - 健康观察：`nutrition_query({view:'household',focus:'health'})` 一次读取最近已记录的睡眠、HRV、静息心率、活动、体重、血压、体温、血糖、少量值得注意的变化。不是临床诊断。不需要全量历史。
 - 个人记录：`nutrition_execute({memberId:'adult_a',operation:'checkin',args:{sleepHours:6.5,rhrBpm:60}})`，返回简短最新状态，通常不需再次请求工具。

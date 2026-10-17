@@ -149,6 +149,8 @@
     details[open] > summary::before { content: "− "; }
     details > summary:hover { color: var(--ink); }
 
+    /* 低门槛视图只调整展示，不改变专业数据和计划 */
+    body.everyday-view .advanced-only { display: none !important; }
     /* 补剂 */
     .supp { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 0; border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left; cursor: pointer; }
     .supp:first-child { border-top: 1px solid var(--rule); }
@@ -227,6 +229,7 @@
         <span>今日消耗目标 <b id="m-target-tdee">—</b></span>
         <span>体重 <b id="m-scale">—</b> · 趋势 <b id="m-ewma">—</b></span>
         <span id="m-demo" class="hidden alert">演示数据</span>
+        <span><button type="button" class="linkbtn" id="view-mode-toggle" onclick="toggleViewMode()" aria-pressed="false">切换到日常视图</button></span>
       </div>
     </header>
     <div class="ticker reveal" style="--i:1"><span id="evt-time">—</span><span id="evt-summary">等待数据</span></div>
@@ -252,7 +255,7 @@
         <dl class="kv" id="kv"></dl>
         <p class="advice" id="advice"></p>
         <div class="focus" id="focus"></div>
-        <div class="seg" role="group" aria-label="切换今日档位">
+        <div class="seg advanced-only" role="group" aria-label="切换今日档位">
           <button data-level="high" onclick="setLevel('high')">高碳</button>
           <button data-level="medium" onclick="setLevel('medium')">中碳</button>
           <button data-level="low" onclick="setLevel('low')">低碳</button>
@@ -289,14 +292,14 @@
           </table>
         </div>
       </div>
-      <div class="c5 reveal" style="--i:5">
+      <div class="c5 reveal advanced-only" style="--i:5">
         <div class="sec-head"><h2><i>iv.</i>补剂</h2><span class="aside" id="supp-count"></span></div>
         <div id="supp-list"></div>
       </div>
     </section>
 
     <!-- 本周 -->
-    <section class="reveal" style="--i:6">
+    <section class="reveal advanced-only" style="--i:6">
       <div class="sec-head"><h2><i>v.</i>本周计划与体重预测</h2><span class="aside">点击某天切换周模板档位</span></div>
       <div class="week" id="week"></div>
       <div class="chart">
@@ -311,7 +314,7 @@
 
     <!-- 校准 + 账本 -->
     <section class="grid">
-      <div class="c5 reveal" style="--i:7">
+      <div class="c5 reveal advanced-only" style="--i:7">
         <div class="sec-head"><h2><i>vi.</i>代谢校准</h2><span class="aside">阻尼 0.35 · 单步 ±120</span></div>
         <dl class="figs" id="figs"></dl>
         <p class="note" id="cal-note"></p>
@@ -348,7 +351,7 @@
           </form>
         </details>
 
-        <details id="pf-details">
+        <details id="pf-details" class="advanced-only">
           <summary>档案、阶段目标与供能比</summary>
           <form id="profile-form" style="margin: 4px 0 16px">
             <div class="form-row profile-grid">
@@ -393,7 +396,7 @@
           </form>
         </details>
       </div>
-      <div class="c5 reveal" style="--i:10">
+      <div class="c5 reveal advanced-only" style="--i:10">
         <div class="sec-head"><h2><i>ix.</i>调用日志</h2></div>
         <div class="journal" id="journal"></div>
       </div>
@@ -409,6 +412,21 @@
 
   <script>
     const LV = { high: "高碳日", medium: "中碳日", low: "低碳日" };
+    // First impression is a capable professional workspace. Simplification is a voluntary
+    // reversible display preference, NOT a downgrade of recorded health data or engine.
+    let everydayView=false;
+    try { everydayView=localStorage.getItem('nutrition.viewMode')==='everyday'; } catch {}
+    function applyViewMode() {
+      document.body.classList.toggle('everyday-view',everydayView);
+      const button=document.getElementById('view-mode-toggle');
+      if(button){button.textContent=everydayView?'切换到专业视图':'切换到日常视图';
+        button.setAttribute('aria-pressed',String(everydayView));}
+    }
+    function toggleViewMode(){
+      everydayView=!everydayView;applyViewMode();
+      try {localStorage.setItem('nutrition.viewMode',everydayView?'everyday':'professional');}catch{}
+    }
+    applyViewMode();
     const LV_SHORT = { high: "高", medium: "中", low: "低" };
     const NEXT = { low: "medium", medium: "high", high: "low" };
     const STATE = { OPTIMAL: ["状态良好", "ok"], CAUTION: ["轻度疲劳", "caution"], OVERRIDE_REST: ["熔断 · 强制恢复", "alert"] };
