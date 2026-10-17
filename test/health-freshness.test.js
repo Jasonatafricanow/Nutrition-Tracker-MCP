@@ -25,6 +25,11 @@ test('household context prefers today over yesterday and does not repeat yesterd
    assert.equal(m.latest.restingHeartRate,62);
    assert.equal(m.latest.restingHeartRateDate,'2026-10-18');
    assert.equal(m.noteworthy.some(s=>s.key==='short_sleep'),false);
+   // Most recent measured weight should still be visible on a non-weigh-in day.
+   f.household.memberTool('a','log_morning_checkin',{measuredAt:'2026-10-17T07:00:00+08:00',scaleWeightKg:72.3});
+   const weight=f.household.context({days:7}).members[0].latest;
+   assert.equal(weight.weightKg,72.3);
+   assert.equal(weight.weightDate,'2026-10-17');
  }finally{f.close();}
 });
 test('device event ID is replay-safe but rejects a different body, preserving the original measure',()=>{
@@ -54,4 +59,14 @@ test('prior database rows without payload hash remain readable with explicit unv
    assert.throws(()=>engine.execute('log_morning_checkin',{...reading,measuredAt:'2026-10-17T07:00:00+08:00'},'DEVICE'),/sourceEventId/);
    engine.close();
  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('multiple same-day health observations return the latest measuredAt timestamp',()=>{
+ const f=fixture();try{
+   f.household.logObservation({memberId:'a',kind:'blood_pressure',observedAt:'2026-10-17T22:00:00+08:00',systolic:132,diastolic:85});
+   f.household.logObservation({memberId:'a',kind:'blood_pressure',observedAt:'2026-10-17T08:00:00+08:00',systolic:119,diastolic:77});
+   const latest=f.household.context({days:7}).members[0].latest.bloodPressure;
+   assert.equal(latest.systolic,132);
+   assert.equal(latest.diastolic,85);
+ }finally{f.close();}
 });
