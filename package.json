@@ -1,15 +1,19 @@
 {
   "name": "nutrition-tracker-mcp",
-  "version": "5.1.0",
+  "version": "5.3.0-beta.1",
   "private": true,
-  "description": "碳水循环 + 动态 TDEE 校准的 MCP 服务端与观察窗",
+  "description": "Agent-first MCP nutrition ledger: fast meal logging, reusable templates, local-first tracking and cautious TDEE calibration",
   "type": "module",
   "main": "server.js",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "start": "node server.js",
     "demo": "node server.js --demo",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:photo-benchmark": "node --test test/photo-benchmark.test.js",
+    "eval:photo:example": "node audit/eval-photo-estimates.mjs --example"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",

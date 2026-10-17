@@ -1,0 +1,12 @@
+node_modules
+vendor
+.git
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+benchmark/private
+coverage
+*.zip
+.github

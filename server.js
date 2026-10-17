@@ -1,4 +1,4 @@
-// Nutrition Tracker MCP v5：同一进程里同时提供
+// Nutrition Tracker MCP v5.2 experimental：同一进程里同时提供
 //   - stdio MCP 工具（给 Claude Desktop / Claude Code 等 Agent 调用）
 //   - HTTP 观察窗 + SSE 实时推送 + 手机健康 Webhook
 // 多个进程共用同一个 SQLite 文件时，靠 PRAGMA data_version 轮询感知别的进程的写入。
@@ -9,6 +9,11 @@ import { fileURLToPath } from "url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createEngine, TOOL_DEFS, ToolError } from "./engine.js";
+import { PHOTO_ESTIMATION_PROMPT } from "./photo-estimation.js";
+import { AGENT_WORKFLOW, AGENT_WORKFLOW_VERSION } from "./agent-workflow.js";
+import { createUSDAClient } from "./usda-foods.js";
+import { z } from "zod";
+import { startRemoteMcp } from "./remote-mcp.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = process.argv.includes("--demo");
@@ -20,6 +25,7 @@ const USE_STDIO = !process.stdin.isTTY && !process.argv.includes("--no-stdio");
 
 const log = (...a) => console.error("[Nutrition Tracker MCP]", ...a); // stdout 留给 MCP 协议
 const engine = createEngine(DB_PATH, { demo: DEMO });
+const usda = createUSDAClient();
 const csrfToken = randomBytes(32).toString("hex");
 const apiToken = process.env.NUTRITION_API_TOKEN;
 const webhookToken = process.env.HEALTH_WEBHOOK_TOKEN;
@@ -140,8 +146,8 @@ setInterval(() => {
 }, 60_000).unref();
 
 // ==================== MCP ====================
-if (USE_STDIO) {
-  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.1.0" });
+function createMcpServer() {
+  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.3.0-beta.1" });
 
   for (const [name, def] of Object.entries(TOOL_DEFS)) {
     mcp.registerTool(name, { description: def.description, inputSchema: def.shape }, async (args) => {
@@ -153,6 +159,41 @@ if (USE_STDIO) {
     });
   }
 
+  mcp.registerTool('get_agent_workflow', {
+    description:'Read the agent-first routing contract for text meals, photos, corrections and safe external food lookup.',
+    inputSchema:{}
+  },async()=>({content:[{type:'text',text:JSON.stringify({ok:true,version:AGENT_WORKFLOW_VERSION,instructions:AGENT_WORKFLOW})}]}));
+
+  mcp.registerTool('search_usda_foods', {
+    description:'Optional read-only USDA FoodData Central search, requires FDC_API_KEY. Results are candidates, NOT local food IDs.',
+    inputSchema:{query:z.string().trim().min(1).max(120),limit:z.number().int().min(1).max(20).default(10)}
+  },async({query,limit})=>{
+    try {return {content:[{type:'text',text:JSON.stringify(await usda.search(query,limit))}]};}
+    catch(e){return {isError:true,content:[{type:'text',text:String(e.message)}]};}
+  });
+
+  mcp.registerTool('get_usda_food_details', {
+    description:'Fetch FDC source details for a selected identifier. Rejects incomplete or unsupported nutrient panels; does not modify the ledger.',
+    inputSchema:{fdcId:z.number().int().positive()}
+  },async({fdcId})=>{
+    try {return {content:[{type:'text',text:JSON.stringify(await usda.details(fdcId))}]};}
+    catch(e){return {isError:true,content:[{type:'text',text:String(e.message)}]};}
+  });
+
+  mcp.registerPrompt('nutrition_agent_workflow', {
+    title:'Agent-first nutrition logging workflow',
+    description:'Route text meals, photos, corrections and external food search into validated MCP operations.'
+  },async()=>({description:AGENT_WORKFLOW_VERSION,
+    messages:[{role:'user',content:{type:'text',text:AGENT_WORKFLOW}}]}));
+
+  // MCP prompt: external vision Agent sees the user's image; this server supplies
+  // the compilation protocol and validates the resulting JSON via stage_photo_estimate.
+  mcp.registerPrompt('estimate_meal_photo', {
+    title:'Compile a meal photo into a nutrition estimate',
+    description:'Structured item identification + edible mass ranges with visible evidence, uncertainty, and explicit unknowns (no automatic ledger writes).'
+  }, async () => ({description:'Apply this prompt to the image provided by the user; return JSON for stage_photo_estimate.',
+    messages:[{role:'user',content:{type:'text',text:PHOTO_ESTIMATION_PROMPT}}]}));
+
   mcp.registerResource(
     "snapshot",
     "telemetry://snapshot",
@@ -160,6 +201,14 @@ if (USE_STDIO) {
     async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(engine.buildSnapshot(), null, 1) }] })
   );
 
+  return mcp;
+}
+
+// Optional remote MCP, isolated from the Dashboard HTTP listener.
+startRemoteMcp({makeServer:createMcpServer,log});
+
+if (USE_STDIO) {
+  const mcp=createMcpServer();
   await mcp.connect(new StdioServerTransport());
   // MCP 客户端退出后不要留下占着端口的孤儿进程
   process.stdin.on("close", () => process.exit(0));
