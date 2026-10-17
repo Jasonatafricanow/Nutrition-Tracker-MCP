@@ -83,10 +83,15 @@ test('family health webhook requires member attribution and updates only that me
   const post=payload=>fetch(url,{method:'POST',headers:{Authorization:'Bearer low-friction-webhook-test-token','Content-Type':'application/json'},body:JSON.stringify(payload)});
   const noMember=await post({sleepHours:5});assert.equal(noMember.status,400);
   const unknown=await post({memberId:'missing',sleepHours:5});assert.ok(unknown.status>=400);
-  const good=await post({memberId:'alice',sleepHours:5.25,sourceEventId:'alice-sleep-1',measuredAt:'2026-10-17T22:00:00Z'});assert.equal(good.status,200);
+  // Fixed future timestamps depend on CI clock; use a genuinely past measurement.
+  const observedAt=new Date(Date.now()-2*3600_000).toISOString();
+  const good=await post({memberId:'alice',sleepHours:5.25,sourceEventId:'alice-sleep-1',measuredAt:observedAt});
+  assert.equal(good.status,200,await good.text());
   const family=await(await fetch(`http://127.0.0.1:${port}/api/household`)).json();
-  assert.ok(family.members.some(x=>x.memberId==='alice'));
-  assert.ok(family.members.some(x=>x.memberId==='bob'));
+  const alice=family.members.find(x=>x.memberId==='alice'),bob=family.members.find(x=>x.memberId==='bob');
+  assert.ok(alice&&bob);
+  assert.equal(alice.latest.sleepHours,5.25);
+  assert.equal(bob.latest.sleepHours,null);
  }finally{proc.kill();f.close();}
 });
 test('Dashboard offers reversible everyday view and direct correction affordance',async()=>{
