@@ -1276,7 +1276,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
            (a.date&&existing.date!==a.date)||(a.mealSlot&&existing.slot!==a.mealSlot))
           throw new ToolError("requestId 已用于不同的餐食更正");
         return tools.update_meal_item({mealId:prior.mealId,expectedRevision:prior.before.revision,
-          requestId:a.requestId,weightGrams:a.weightGrams,portionSource:"user_estimate"},source);
+          weightGrams:a.weightGrams,requestId:a.requestId,portionSource:"user_estimate"},source);
       }
       const days=a.date?[a.date]:[today(),offsetDateStr(today(),-1)];
       let matches=[];
