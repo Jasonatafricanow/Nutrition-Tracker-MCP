@@ -11,7 +11,7 @@ const READ_GROUPS = {
   extras: ['save_meal_template','log_meal_template','update_supplement_stack','add_food_to_library']
 };
 const OPERATIONS = Object.freeze({
-  meal:'log_meal_items', quick_meal:'log_estimated_meal', checkin:'log_morning_checkin', correction:'update_meal_item',
+  meal:'log_meal_items', quick_meal:'log_estimated_meal', checkin:'log_morning_checkin', correction:'update_meal_item', recent_correction:'correct_recent_meal',
   photo_stage:'stage_photo_estimate', photo_confirm:'confirm_photo_meal', photo_discard:'discard_photo_meal',
   template_save:'save_meal_template', template_log:'log_meal_template',
   supplement:'update_supplement_stack', plan:'set_day_context', profile:'set_profile',
@@ -103,9 +103,9 @@ export function createAgentInterface({engine,household=null,usda=null}={}){
  }
  function execute({memberId,operation,args={},tool,includeContext=true}={}){
    const afterWrite=(out)=>{
-     if(!includeContext||!['meal','quick_meal','checkin','health_observation','correction'].includes(operation))return out;
+     if(!includeContext||!['meal','quick_meal','checkin','health_observation','correction','recent_correction'].includes(operation))return out;
      if(household){const r=household.context({days:3,memberId});
-       const c=projectHousehold(r,operation==='meal'||operation==='quick_meal'||operation==='correction'?'food':'health');
+       const c=projectHousehold(r,['meal','quick_meal','correction','recent_correction'].includes(operation)?'food':'health');
        return {...out,context:c.members[0]};
      }
      const x=engine.execute('get_agent_context',{},'MCP_COMPACT');

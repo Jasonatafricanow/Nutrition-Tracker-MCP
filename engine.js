@@ -365,6 +365,11 @@ export const TOOL_DEFS = {
     description: "Agent 根据餐食 ID 与预期版本原子修改已记账项目；保留修改前后审计，防止并发覆盖和重试重复修改。原份量比例缩放不重新查询食材成分。",
     shape: editMealSchema
   },
+  correct_recent_meal: {
+    description: "根据食物名称自动定位今天或昨天的一条餐食，单次调用更正其克重并保留审计。不唯一时拒绝修改、要求用户澄清。",
+    shape: {foodName:z.string().trim().min(1).max(100),weightGrams:z.number().positive().max(5000),
+      date:calendarDate.optional(),mealSlot:z.enum(MEAL_SLOTS).optional(),requestId:z.string().trim().min(1).max(128)}
+  },
   get_meal_corrections: {
     description: "只读查询指定餐食的历史修改记录（旧值、新值、时间及来源），供 Agent 审计和回顾。",
     shape: {mealId:z.string().min(1)}
@@ -1257,6 +1262,34 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         return result;
       });
       return {result,summary:result.duplicate?null:`修正餐食 ${a.mealId}：${result.before.weightGrams}g → ${result.after.weightGrams}g`};
+    },
+
+    correct_recent_meal(a,source) {
+      // One Agent operation instead of forcing the user to find an internal meal ID/revision.
+      // Reuses the existing audited, optimistic-concurrency correction; ambiguity blocks writes.
+      const receipt=q("SELECT result_json FROM agent_request_receipts WHERE tool_name='update_meal_item' AND request_id=?").get(a.requestId);
+      if(receipt){
+        const prior=JSON.parse(receipt.result_json);
+        const existing=q("SELECT id,name,slot,date FROM meal_logs WHERE id=?").get(prior.mealId);
+        if(!existing||prior.after.weightGrams!==a.weightGrams||
+           !existing.name.toLowerCase().includes(a.foodName.trim().toLowerCase())||
+           (a.date&&existing.date!==a.date)||(a.mealSlot&&existing.slot!==a.mealSlot))
+          throw new ToolError("requestId 已用于不同的餐食更正");
+        return tools.update_meal_item({mealId:prior.mealId,expectedRevision:prior.before.revision,
+          requestId:a.requestId,weightGrams:a.weightGrams,portionSource:"user_estimate"},source);
+      }
+      const days=a.date?[a.date]:[today(),offsetDateStr(today(),-1)];
+      let matches=[];
+      for(const date of days){
+        if(date>today())throw new ToolError("不能修改未来餐食");
+        const candidates=q("SELECT id,name,slot,date,revision FROM meal_logs WHERE date=? ORDER BY created_at DESC,id DESC").all(date);
+        matches=candidates.filter(x=>x.name.toLowerCase().includes(a.foodName.toLowerCase())&&(!a.mealSlot||x.slot===a.mealSlot));
+        if(matches.length)break; // Prefer today; yesterday only if none today.
+      }
+      if(!matches.length)throw new ToolError("最近两天没有匹配的餐食；请确认名称或日期");
+      if(matches.length!==1)throw new ToolError("找到多条同名餐食；请补充日期/餐次，避免改错");
+      return tools.update_meal_item({mealId:matches[0].id,expectedRevision:matches[0].revision,
+        weightGrams:a.weightGrams,requestId:a.requestId,portionSource:"user_estimate"},source);
     },
 
     get_meal_corrections(a) {
