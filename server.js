@@ -93,7 +93,14 @@ app.get("/api/snapshot", (req, res) => res.json(engine.buildSnapshot()));
 app.get("/api/household", (req,res)=> {
   if (!household) return res.status(404).json({error:"Household mode disabled"});
   if (!sameOrigin(req)) return res.status(403).json({error:"Origin denied"});
-  try {res.json(household.context());} catch(e){res.status(500).json({error:"Household unavailable"});}
+  try {
+    // On-demand member meal list for the lightweight Dashboard correction panel.
+    if(req.query.view==='meals'){
+      if(typeof req.query.memberId!=='string')return res.status(400).json({error:"memberId required"});
+      return res.json(household.memberTool(req.query.memberId,"get_meal_history",{}));
+    }
+    res.json(household.context());
+  } catch(e){res.status(400).json({error:e.message});}
 });
 
 app.get("/api/stream", (req, res) => {
@@ -109,7 +116,12 @@ app.get("/api/stream", (req, res) => {
 
 app.post("/api/mcp-dispatch", authorizeDispatch, (req, res) => {
   try {
-    res.json(run(req.body?.tool, req.body?.args, "VIEWPORT"));
+    const {tool,args,memberId}=req.body??{};
+    if(memberId!==undefined){
+      if(!household||typeof memberId!=='string')return res.status(400).json({ok:false,error:"Invalid household member"});
+      return res.json(household.memberTool(memberId,tool,args));
+    }
+    res.json(run(tool,args,"VIEWPORT"));
   } catch (e) {
     res.status(e instanceof ToolError ? 400 : 500).json({ ok: false, error: e.message });
   }

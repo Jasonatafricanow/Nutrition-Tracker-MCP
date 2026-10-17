@@ -458,11 +458,11 @@
       }
       return csrfToken;
     }
-    async function dispatch(tool, args = {}) {
+    async function dispatch(tool, args = {}, memberId) {
       if (!connected) return toast("未连接服务端，操作未执行");
       try {
         const csrf = await sessionToken();
-        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json", "X-Nutrition-CSRF":csrf }, body: JSON.stringify({ tool, args }) });
+        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json", "X-Nutrition-CSRF":csrf }, body: JSON.stringify({ tool, args, ...(memberId?{memberId}:{}) }) });
         const body = await r.json();
         if (!r.ok) toast(body.error || `请求失败 ${r.status}`);
         return body;
@@ -751,6 +751,28 @@
       }
     });
 
+    async function loadHouseholdMeals(memberId) {
+      const container=$('household-meals-'+memberId);
+      if(!container)return;
+      try{
+        const response=await fetch('/api/household?view=meals&memberId='+encodeURIComponent(memberId));
+        if(!response.ok)throw Error('无法读取');
+        const history=await response.json();
+        container.innerHTML=history.meals?.length ? history.meals.map(m=>
+          `<div style="margin:7px 0"><span>${esc(m.name)} · ${m.weight_g}g${m.source_kind?.includes('estimate')?'（估算）':''}</span>
+             <button type="button" class="linkbtn" onclick="editHouseholdMeal('${esc(memberId)}','${esc(m.id)}',${m.revision??0},${m.weight_g})">校准</button></div>`
+        ).join(''):'今日暂无餐食';
+      }catch{container.textContent='无法读取今日餐食';}
+    }
+    async function editHouseholdMeal(memberId,mealId,expectedRevision,currentGrams) {
+      const raw=prompt("更正这条餐食的克重（保留修改历史）",String(currentGrams));
+      if(raw===null)return;
+      const weightGrams=Number(raw);
+      if(!Number.isFinite(weightGrams)||weightGrams<=0||weightGrams>5000)return toast('请输入有效克重');
+      const requestId='family-ui-edit-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+      const result=await dispatch('update_meal_item',{mealId,expectedRevision,requestId,weightGrams,portionSource:'user_estimate'},memberId);
+      if(result?.ok){await loadHouseholdMeals(memberId);toast('已更正，保留历史');}
+    }
     async function refreshHousehold() {
       try {
         const res=await fetch('/api/household');
@@ -770,7 +792,10 @@
           const notes=(m.noteworthy||[]).slice(0,1).map(v=>v.observation).join('；');
           return `<article class="household-card"><h3>${esc(m.name)} <small>${m.mode==='performance'?'运动营养':'日常观察'}</small></h3>
             <div class="mini">${fields.map(([a,b])=>`<div><span>${esc(a)}</span> ${esc(b)}</div>`).join('')}</div>
-            ${notes?`<p>${esc(notes)}</p>`:''}</article>`;
+            ${notes?`<p>${esc(notes)}</p>`:''}
+            <details><summary onclick="loadHouseholdMeals('${esc(m.memberId)}')">查看今日餐食 · 校准</summary>
+              <div id="household-meals-${esc(m.memberId)}" class="small muted">点击加载</div>
+            </details></article>`;
         }).join('');
       } catch {} // A secondary panel should never break personal nutrition UI
     }

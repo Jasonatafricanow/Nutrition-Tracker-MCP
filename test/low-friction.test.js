@@ -92,6 +92,16 @@ test('family health webhook requires member attribution and updates only that me
   assert.ok(alice&&bob);
   assert.equal(alice.latest.sleepHours,5.25);
   assert.equal(bob.latest.sleepHours,null);
+  // Per-member Dashboard correction routes reuse the existing revision audit.
+  const csrf=(await(await fetch(`http://127.0.0.1:${port}/api/session`)).json()).csrfToken;
+  const memberMeals=await fetch(`http://127.0.0.1:${port}/api/household?view=meals&memberId=alice`);
+  assert.equal(memberMeals.status,200);
+  const wrong=await fetch(`http://127.0.0.1:${port}/api/household?view=meals&memberId=unknown`);
+  assert.equal(wrong.status,400);
+  const unauthorized=await fetch(`http://127.0.0.1:${port}/api/mcp-dispatch`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({memberId:'alice',tool:'get_meal_history',args:{}})});
+  assert.equal(unauthorized.status,401);
+  const routed=await fetch(`http://127.0.0.1:${port}/api/mcp-dispatch`,{method:'POST',headers:{'Content-Type':'application/json','X-Nutrition-CSRF':csrf},body:JSON.stringify({memberId:'alice',tool:'get_meal_history',args:{}})});
+  assert.equal(routed.status,200);
  }finally{proc.kill();f.close();}
 });
 test('Dashboard offers reversible everyday view and direct correction affordance',async()=>{
