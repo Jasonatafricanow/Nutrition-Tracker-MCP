@@ -22,6 +22,15 @@
 
 The Dashboard initially exposes existing professional nutrition, recovery and trend views. Users can switch to a simpler everyday view at any time **without deleting data or changing the underlying calculations**. This is a voluntary presentation preference: do not automatically infer user disengagement or apply a clinical/programmatic downgrade. Everyday tracking still supports fast meals, sleep, weight and activity. For meal text the Agent may save an explicitly labeled estimate in one user turn; **for meal photos it must first show a brief food-identification and portion preview and obtain one combined approval before saving**. See [the product pivot decision](docs/PRODUCT_STRATEGY_AGENT_FIRST_ZH.md).
 
+## Next iteration: fast correction, family meals and brief feedback
+
+- **Fix the last meal without IDs:** `nutrition_execute({operation:"recent_correction",memberId:"alex",args:{foodName:"米饭",weightGrams:220,requestId:"fix-once"}})` finds an unambiguous recent item, updates it with versioned audit, and refuses ambiguous names.
+- **Reuse existing family meals:** save a regularly eaten meal with `template_save`; query all household members' saved templates using `nutrition_query({view:"family_recipes",query:"鸡肉"})` for portions and shared dinner planning. This reuses existing records and does **not** add an inventory subsystem.
+- **Read-only product barcode:** `nutrition_query({view:"barcode",barcode:"0123456789012"})` retrieves attributed packaging macros from Open Food Facts. Data is external crowdsourced reference, **not** a verified local `foodId`; review label before optional import.
+- **Weekly/monthly observations:** `nutrition_query({view:"report",memberId:"alex",days:7})` (or 30) reports only dates with observations. Missing dates are unknown, not zero.
+
+The feature set stays within two default MCP tools; real Agent call traces and NAS deployment are still to be validated. Open Food Facts uses ODbL terms: [API docs](https://openfoodfacts.github.io/documentation/docs/Product-Opener/api/) · [license/reuse terms](https://support.openfoodfacts.org/help/en-gb/12-api-data-reuse/94-are-there-conditions-to-use-the-api).
+
 ## Current development: lightweight family NAS + compact Agent MCP
 
 The current `main` implementation rebuilds household features **from the pre-family v5.3 baseline**. The household is the trusted boundary; member IDs label data, not accounts. No family SaaS login, per-member Bearer tokens or repeated sharing consent flows. Two default MCP tools replace the exposed dozens of low-level operations; the existing nutrition engine remains authoritative. Full legacy tools are available only with `MCP_TOOL_SURFACE=full` for migration.
