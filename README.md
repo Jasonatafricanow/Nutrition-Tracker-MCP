@@ -12,6 +12,12 @@
 
 ---
 
+## Product direction: easy to record, easy to correct
+
+**Default user: an ordinary person developing a healthy habit, not a competitive athlete or a clinical patient.** Aim for one conversational turn to log a meal or daily observation. Agent estimates are acceptable when clearly labeled; save provenance and make corrections easy in chat and the Dashboard. Advanced carb cycling/TDEE remains opt-in, not an onboarding hurdle. The strict photo-review flow remains available, but should not be compulsory for casual records.
+
+**[产品转向决策记录：为什么主动容忍合理误差](docs/PRODUCT_STRATEGY_AGENT_FIRST_ZH.md)** — documents the tradeoff between single-entry accuracy, user effort, continuity, traceability, correction, and real Agent evaluation.
+
 ## Current development: lightweight family NAS + compact Agent MCP
 
 The current `main` implementation rebuilds household features **from the pre-family v5.3 baseline**. The household is the trusted boundary; member IDs label data, not accounts. No family SaaS login, per-member Bearer tokens or repeated sharing consent flows. Two default MCP tools replace the exposed dozens of low-level operations; the existing nutrition engine remains authoritative. Full legacy tools are available only with `MCP_TOOL_SURFACE=full` for migration.
