@@ -183,6 +183,22 @@ const photoCandidateSchema = z.object({
   evidence: z.array(z.string()).max(8).optional(),
   portionMethod: z.enum(["reference_object","container_geometry","visual_only","user_provided","not_estimable"]).optional()
 });
+const confirmationEvidenceSchema = z.object({
+  channel: z.enum(["user_message", "host_approval"]),
+  summary: z.string().trim().min(4).max(300),
+  reference: z.string().trim().min(1).max(200).optional()
+}).strict();
+const editMealSchema = {
+  mealId: z.string().min(1),
+  expectedRevision: z.number().int().min(0),
+  requestId: z.string().trim().min(1).max(128),
+  weightGrams: z.number().positive().max(5000),
+  foodId: z.string().optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+  portionSource: z.enum(["measured", "user_estimate", "visual_estimate"]).optional(),
+  nutritionSource: z.enum(["food_label","trusted_database","user_supplied"]).optional(),
+  p: z.number().min(0).optional(),c: z.number().min(0).optional(),f: z.number().min(0).optional()
+};
 const photoDecisionSchema = z.object({
   index: z.number().int().min(0),
   include: z.boolean(),
@@ -215,7 +231,7 @@ export const TOOL_DEFS = {
   get_photo_meal_draft: {description:"读取待确认的照片餐食草稿、可用的食材匹配与不确定性", shape:{draftId:z.string().min(1)}},
   confirm_photo_meal: {
     description: "用户审核每个照片候选的食物、份量及营养数据来源后原子入账。必须 confirmed=true，所有候选均给决策；requestId 防重复。",
-    shape:{draftId:z.string().min(1),confirmed:z.literal(true),requestId:z.string().min(1).max(128),decisions:z.array(photoDecisionSchema).min(1).max(20)}
+    shape:{draftId:z.string().min(1),confirmed:z.literal(true),confirmationEvidence:confirmationEvidenceSchema,requestId:z.string().min(1).max(128),decisions:z.array(photoDecisionSchema).min(1).max(20)}
   },
   discard_photo_meal: {description:"取消尚未提交的照片餐食草稿",shape:{draftId:z.string().min(1)}},
   get_agent_context: {
@@ -330,6 +346,14 @@ export const TOOL_DEFS = {
     description: "导出指定日期范围的本地饮食/测量账本和餐食明细(JSON)，用于 Agent 分析或用户备份；只读，最长90天，敏感数据不应发送给未授权的第三方。",
     shape: { fromDate: calendarDate, toDate: calendarDate }
   },
+  update_meal_item: {
+    description: "Agent 根据餐食 ID 与预期版本原子修改已记账项目；保留修改前后审计，防止并发覆盖和重试重复修改。原份量比例缩放不重新查询食材成分。",
+    shape: editMealSchema
+  },
+  get_meal_corrections: {
+    description: "只读查询指定餐食的历史修改记录（旧值、新值、时间及来源），供 Agent 审计和回顾。",
+    shape: {mealId:z.string().min(1)}
+  },
   delete_meal_item: {
     description: "删除一条膳食记录",
     shape: { mealId: z.string() }
@@ -428,6 +452,12 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       p REAL NOT NULL, c REAL NOT NULL, f REAL NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS meal_corrections (
+      id TEXT PRIMARY KEY, meal_id TEXT NOT NULL, request_id TEXT NOT NULL,
+      changed_at TEXT NOT NULL, actor TEXT NOT NULL,
+      before_json TEXT NOT NULL, after_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_meal_correction_id ON meal_corrections(meal_id,changed_at);
     CREATE INDEX IF NOT EXISTS idx_meal_date ON meal_logs(date);
     CREATE TABLE IF NOT EXISTS photo_meal_drafts (
       id TEXT PRIMARY KEY, date TEXT NOT NULL, slot TEXT NOT NULL,
@@ -506,7 +536,8 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
 
   for (const [table, columns] of Object.entries({
     daily_ledger: [["intake_complete", "INTEGER NOT NULL DEFAULT 0"], ["hrv_metric", "TEXT"], ["weight_measured_at", "TEXT"]],
-    meal_logs: [["source_kind", "TEXT"], ["source_ref", "TEXT"], ["portion_source", "TEXT"]],
+    meal_logs: [["source_kind", "TEXT"], ["source_ref", "TEXT"], ["portion_source", "TEXT"], ["revision", "INTEGER NOT NULL DEFAULT 0"]],
+    photo_meal_drafts: [["confirmation_evidence_json", "TEXT"]],
     tdee_calibrations: [["evidence_hash", "TEXT"], ["last_observation_date", "TEXT"]]
   })) {
     const have = new Set(q(`PRAGMA table_info(${table})`).all().map((x) => x.name));
@@ -692,6 +723,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         }:{} };
     });
     return {ok:true,draftId:raw.id,date:raw.date,mealSlot:raw.slot,status:raw.status,
+      confirmationEvidence:raw.confirmation_evidence_json?JSON.parse(raw.confirmation_evidence_json):null,
       compiledEstimate:estimate,items,questions:estimate?.questions??[],
       hiddenOrUnquantified:estimate?.hiddenOrUnquantified??[],
       photoStored:false,isLogged:raw.status==='logged'};
@@ -886,8 +918,8 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
           intakeComplete:false,photoStored:false};
         q("INSERT INTO agent_request_receipts(tool_name,request_id,payload_hash,result_json,created_at) VALUES (?,?,?,?,?)")
           .run('confirm_photo_meal',a.requestId,payloadHash,JSON.stringify(result),nowIso());
-        q("UPDATE photo_meal_drafts SET status='logged',confirmed_at=?,commit_request_id=?,committed_result_json=? WHERE id=?")
-          .run(nowIso(),a.requestId,JSON.stringify(result),draft.id);
+        q("UPDATE photo_meal_drafts SET status='logged',confirmed_at=?,commit_request_id=?,committed_result_json=?,confirmation_evidence_json=? WHERE id=?")
+          .run(nowIso(),a.requestId,JSON.stringify(result),JSON.stringify(a.confirmationEvidence),draft.id);
         return result;
       });
       return {result,summary:`用户确认照片餐食 ${draft.id}，记录 ${rows.length} 个候选，${excluded.length} 个排除`};
@@ -909,7 +941,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         consumed:{kcal:s.today.intake_kcal,p:s.today.p_g,c:s.today.c_g,f:s.today.f_g},
         remaining:{kcal:s.targets.kcal-s.today.intake_kcal,p:round1(s.targets.p-s.today.p_g),c:round1(s.targets.c-s.today.c_g),f:round1(s.targets.f-s.today.f_g)},
         intakeComplete:!!s.today.intake_complete,
-        recentMeals:s.meals.slice(-12).map(m=>({id:m.id,slot:m.slot,name:m.name,weight_g:m.weight_g,p:m.p,c:m.c,f:m.f})),
+        recentMeals:s.meals.slice(-12).map(m=>({id:m.id,revision:m.revision,slot:m.slot,name:m.name,weight_g:m.weight_g,p:m.p,c:m.c,f:m.f})),
         templates, pendingPhotoDrafts:q("SELECT id,date,slot,status FROM photo_meal_drafts WHERE status='open' ORDER BY created_at DESC LIMIT 5").all(), nutritionWarnings:s.nutritionWarnings,
         agentGuidance:"确认食物、份量及日期后记账；不要将未知摄入记为零；修改餐食将取消全天已完整标记。"
       },summary:null};
@@ -1089,7 +1121,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       const date=a.date??today();
       if (date>today()) throw new ToolError("不能查询未来业务日期");
       const ledger=getRow(date)??null;
-      const rows=q("SELECT id,slot,name,weight_g,p,c,f,created_at,source_kind,source_ref,portion_source FROM meal_logs WHERE date=? ORDER BY created_at,id").all(date);
+      const rows=q("SELECT id,slot,name,weight_g,p,c,f,created_at,source_kind,source_ref,portion_source,revision FROM meal_logs WHERE date=? ORDER BY created_at,id").all(date);
       return {result:{ok:true,date,intakeComplete:!!ledger?.intake_complete,intakeKcal:ledger?.intake_kcal??0,proteinG:ledger?.p_g??0,carbG:ledger?.c_g??0,fatG:ledger?.f_g??0,meals:rows},summary:null};
     },
 
@@ -1133,6 +1165,63 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       const ledger=q("SELECT * FROM daily_ledger WHERE date BETWEEN ? AND ? ORDER BY date").all(a.fromDate,a.toDate);
       const meals=q("SELECT * FROM meal_logs WHERE date BETWEEN ? AND ? ORDER BY date,slot,created_at,id").all(a.fromDate,a.toDate);
       return {result:{ok:true,formatVersion:1,fromDate:a.fromDate,toDate:a.toDate,timeZone,ledger,meals,exportedAt:nowIso()},summary:null};
+    },
+
+    update_meal_item(a, source) {
+      const payloadHash=createHash("sha256").update(JSON.stringify(a)).digest("hex");
+      const result=tx(()=>{
+        const receipt=q("SELECT * FROM agent_request_receipts WHERE tool_name=? AND request_id=?")
+          .get("update_meal_item",a.requestId);
+        if(receipt){
+          if(receipt.payload_hash!==payloadHash)throw new ToolError("requestId 已用于不同的修改内容");
+          return {...JSON.parse(receipt.result_json),duplicate:true};
+        }
+        const before=q("SELECT * FROM meal_logs WHERE id=?").get(a.mealId);
+        if(!before)throw new ToolError("未找到需要修改的餐食");
+        if(before.revision!==a.expectedRevision)throw new ToolError("餐食版本已变化；请重新读取历史后再修改");
+        const nutrients=[a.p,a.c,a.f];
+        const hasAny=nutrients.some(x=>x!==undefined),hasAll=nutrients.every(x=>x!==undefined);
+        if(hasAny && !hasAll)throw new ToolError("必须同时提供 p、c、f");
+        if(a.foodId && hasAny)throw new ToolError("foodId 与显式营养值不能同时指定");
+        let name=a.name??before.name, p,c,f;
+        if(a.foodId){
+          const food=q("SELECT * FROM foods WHERE id=?").get(a.foodId);
+          if(!food)throw new ToolError("食材库没有指定食物");
+          name=a.name??food.name;
+          const ratio=a.weightGrams/100;
+          p=round1(food.p*ratio);c=round1(food.c*ratio);f=round1(food.f*ratio);
+        }else if(hasAll){
+          if(!a.nutritionSource)throw new ToolError("直接输入营养值需要营养来源");
+          p=a.p;c=a.c;f=a.f;
+        }else{
+          if(a.nutritionSource)throw new ToolError("没有新营养值时不能指定新的营养来源");
+          // Recalculate from stored snapshot, not mutable food catalog.
+          const factor=a.weightGrams/before.weight_g;
+          p=round1(before.p*factor);c=round1(before.c*factor);f=round1(before.f*factor);
+        }
+        if(p+c+f>a.weightGrams*1.001)throw new ToolError("营养素总质量不能超过食物份量");
+        const nowValue=nowIso();
+        const change=q(`UPDATE meal_logs SET name=?,weight_g=?,p=?,c=?,f=?,
+          portion_source=COALESCE(?,portion_source),revision=revision+1 WHERE id=? AND revision=?`)
+          .run(name,a.weightGrams,p,c,f,a.portionSource??null,a.mealId,a.expectedRevision);
+        if(change.changes!==1)throw new ToolError("餐食版本冲突");
+        const after=q("SELECT * FROM meal_logs WHERE id=?").get(a.mealId);
+        q("INSERT INTO meal_corrections(id,meal_id,request_id,changed_at,actor,before_json,after_json) VALUES (?,?,?,?,?,?,?)")
+          .run("edit_"+randomUUID(),a.mealId,a.requestId,nowValue,source??"MCP_AGENT",JSON.stringify(before),JSON.stringify(after));
+        recalcIntake(before.date);
+        const result={ok:true,mealId:a.mealId,date:before.date,before:{revision:before.revision,weightGrams:before.weight_g,p:before.p,c:before.c,f:before.f},
+          after:{revision:after.revision,weightGrams:after.weight_g,p:after.p,c:after.c,f:after.f},
+          dayIntakeKcal:getRow(before.date).intake_kcal,intakeComplete:false};
+        q("INSERT INTO agent_request_receipts(tool_name,request_id,payload_hash,result_json,created_at) VALUES (?,?,?,?,?)")
+          .run("update_meal_item",a.requestId,payloadHash,JSON.stringify(result),nowValue);
+        return result;
+      });
+      return {result,summary:result.duplicate?null:`修正餐食 ${a.mealId}：${result.before.weightGrams}g → ${result.after.weightGrams}g`};
+    },
+
+    get_meal_corrections(a) {
+      const entries=q("SELECT id,meal_id,request_id,changed_at,actor,before_json,after_json FROM meal_corrections WHERE meal_id=? ORDER BY changed_at,id").all(a.mealId);
+      return {result:{ok:true,mealId:a.mealId,corrections:entries.map(e=>({id:e.id,changedAt:e.changed_at,actor:e.actor,before:JSON.parse(e.before_json),after:JSON.parse(e.after_json)}))},summary:null};
     },
 
     delete_meal_item(a) {

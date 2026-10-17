@@ -62,6 +62,17 @@ Once the ledger contains that meal, the agent may call `save_meal_template` with
 
 See [Agent workflow reference](docs/AGENT_WORKFLOWS.md) for structured calls and the trust boundary.
 
+## v5.2 agent workflow completion (alpha.3)
+
+The MCP module now exposes the `nutrition_agent_workflow` Prompt (plus `get_agent_workflow` for Prompt-less hosts). It routes **text, photographed meals, food corrections, local templates and optional external USDA searches** into explicit, auditable tool calls. It is host-supplied guidance, not a guarantee that every Agent will auto-load prompts.
+
+- `update_meal_item({mealId,expectedRevision,requestId,weightGrams,...})`: atomic correction of a persisted meal with optimistic revision checks, snapshot-based macro scaling, idempotent request receipt, daily ledger recalculation and an immutable `meal_corrections` before/after audit. `get_meal_corrections` reads the correction history.
+- `confirm_photo_meal` now **requires** `confirmationEvidence:{channel,summary,reference?}`; the draft persists the source of the Agent's claimed explicit user approval. The MCP server cannot independently authenticate the user's chat approval.
+- `search_usda_foods` and `get_usda_food_details`: opt-in **read-only MCP tools** using `FDC_API_KEY` server-side, limited to Foundation/SR Legacy references with complete per-100g P/C/F in grams. The Agent must still confirm identity and optionally save the reviewed record through `add_food_to_library`. External search never auto-records calories.
+- The Dashboard remains secondary; all new functionality operates over MCP without a frontend dependency.
+
+See [Agent runtime integration](docs/AGENT_RUNTIME.md) and [Photo protocol](docs/PHOTO_ESTIMATION_PROTOCOL.md). The USDA adapter is optional and does not block local meal logging when disconnected.
+
 ## Interface preview
 
 ![The actual Nutrition Tracker MCP dashboard, rendered using the built-in demo data](assets/dashboard-preview.jpg)
@@ -78,7 +89,7 @@ The visual direction is an **editorial training journal**: warm paper, ink-like 
 | **02** | Diet and supplement ledger | Meal portions, food library, daily totals, supplement check-ins, local persistence |
 | **03** | Recovery inputs | Optional HRV, resting heart rate, sleep, activity, and weight check-ins |
 | **04** | Adaptive TDEE | Weight-trend comparison, bounded corrections, calibration diagnostics |
-| **05** | MCP-native controls | 18 tools and one read-only snapshot resource for an AI agent |
+| **05** | MCP-native controls | 29 tools (26 engine + 3 agent-side integrations) and one read-only snapshot resource for an AI agent |
 | **06** | Live observability | HTTP dashboard, SSE updates, SQLite WAL and cross-process change detection |
 
 ## v5.1 correctness and safety changes
@@ -155,6 +166,8 @@ flowchart TB
 ```text
 Nutrition-Tracker-MCP/
 ├── engine.js                   # Nutrition model, tools, SQLite ledger
+├── agent-workflow.js           # Canonical host-independent agent routing Prompt
+├── usda-foods.js               # Optional read-only external food reference adapter
 ├── server.js                   # stdio MCP + HTTP API + SSE
 ├── viewport.html               # Standalone responsive dashboard
 ├── test/engine.test.js         # Node built-in test runner
@@ -218,6 +231,8 @@ Read-only MCP resource: **`telemetry://snapshot`** (`application/json`).
 | POST | `/api/mcp-dispatch` | Invoke a validated engine tool |
 | POST | `/api/health-webhook` | Import optional morning measurements |
 
+Set `FDC_API_KEY` for optional USDA FoodData Central queries. Never put API keys in Agent messages. Details: [Agent runtime guide](docs/AGENT_RUNTIME.md).
+
 The optional webhook accepts `weightKg` / `scaleWeightKg`, `hrvMs`, `hrvMetric`, `rhrBpm`, `sleepHours`, `deepSleepPct`, `steps`, `activeKcal`, `measuredAt`, `sourceEventId`, and `source`. It requires `Authorization: Bearer $HEALTH_WEBHOOK_TOKEN` and is disabled until that environment variable is configured. It does **not** connect directly to Apple Health or Health Connect.
 
 | Environment variable | Default | Purpose |
@@ -228,6 +243,7 @@ The optional webhook accepts `weightKg` / `scaleWeightKg`, `hrvMs`, `hrvMetric`,
 | `NUTRITION_TIME_ZONE` | host IANA time zone | Personal ledger date/time-zone attribution |
 | `NUTRITION_API_TOKEN` | unset | Optional Bearer token for trusted programmatic HTTP writes |
 | `HEALTH_WEBHOOK_TOKEN` | unset (disabled) | Required Bearer token for incoming health webhooks |
+| `FDC_API_KEY` | unset (USDA lookup disabled) | USDA FoodData Central API credential; used only by the MCP process |
 
 ## Engineering notes
 

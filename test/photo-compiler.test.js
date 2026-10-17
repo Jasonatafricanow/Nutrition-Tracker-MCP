@@ -47,8 +47,8 @@ test('uncertain or obscured foods can have null weights; hidden oil stays unreso
    assert.equal(f.e.execute('get_agent_context',{}).pendingPhotoDrafts.length,1);
    const saved=f.e.execute('get_photo_meal_draft',{draftId:draft.draftId});
    assert.deepEqual(saved.compiledEstimate,x);
-   assert.throws(()=>f.e.execute('confirm_photo_meal',{draftId:draft.draftId,confirmed:true,requestId:'once',decisions:[{index:0,include:true,weightGrams:180,portionSource:'visual_estimate'}]}),/每个照片候选/);
-   const confirm=f.e.execute('confirm_photo_meal',{draftId:draft.draftId,confirmed:true,requestId:'once',decisions:[{index:0,include:true,weightGrams:180,portionSource:'visual_estimate'},{index:1,include:false}]});
+   assert.throws(()=>f.e.execute('confirm_photo_meal',{draftId:draft.draftId,confirmed:true,confirmationEvidence:{channel:'user_message',summary:'User explicitly confirmed item and estimated portion'},requestId:'once',decisions:[{index:0,include:true,weightGrams:180,portionSource:'visual_estimate'}]}),/每个照片候选/);
+   const confirm=f.e.execute('confirm_photo_meal',{draftId:draft.draftId,confirmed:true,confirmationEvidence:{channel:'user_message',summary:'User explicitly confirmed item and estimated portion'},requestId:'once',decisions:[{index:0,include:true,weightGrams:180,portionSource:'visual_estimate'},{index:1,include:false}]});
    assert.equal(confirm.partial,true);
    assert.equal(f.e.execute('get_meal_history',{}).meals.length,1);
  }finally{f.close();}

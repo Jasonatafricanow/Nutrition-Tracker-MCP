@@ -11,7 +11,7 @@ function prepare(e,items=[{name:'看起来是熟米饭',foodId:'f7',estimatedWei
   return e.execute('prepare_photo_meal',{date:'2026-10-16',mealSlot:'午餐',items,...opts});
 }
 function confirm(e,draftId,extra={}){
-  return e.execute('confirm_photo_meal',{draftId,confirmed:true,requestId:'photo-turn-1',decisions:[{index:0,include:true,weightGrams:180,portionSource:'visual_estimate'}],...extra});
+  return e.execute('confirm_photo_meal',{draftId,confirmed:true,confirmationEvidence:{channel:'user_message',summary:'User explicitly confirmed item and estimated portion'},requestId:'photo-turn-1',decisions:[{index:0,include:true,weightGrams:180,portionSource:'visual_estimate'}],...extra});
 }
 test('photo tools are exposed to an agent and drafts do not write food or binary image',()=>{
   const f=fixture();try{
