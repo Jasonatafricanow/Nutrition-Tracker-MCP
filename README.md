@@ -6,7 +6,7 @@
 
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-303633?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/) [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-stdio-303633?style=flat-square)](https://modelcontextprotocol.io/) ![Storage](https://img.shields.io/badge/SQLite-local--first-303633?style=flat-square) ![Status](https://img.shields.io/badge/status-portfolio%20prototype-B53A27?style=flat-square)
 
-**[Remote MCP deployment (中文)](docs/REMOTE_MCP_DEPLOYMENT_ZH.md) · [Preview](#interface-preview) · [Quick start](#quick-start) · [Architecture](#architecture) · [MCP tools](#mcp-integration) · [Design decisions](#engineering-notes)**
+**[Remote MCP deployment (中文)](docs/REMOTE_MCP_DEPLOYMENT_ZH.md) · [本地 Agent 安装说明](docs/INSTALL_AND_AGENT_SETUP_ZH.md) · [Preview](#interface-preview) · [Quick start](#quick-start) · [Architecture](#architecture) · [MCP tools](#mcp-integration) · [Design decisions](#engineering-notes)**
 
 </div>
 
@@ -20,7 +20,7 @@ The application brings together daily food logging, weekly carb cycling, optiona
 
 The central deliverable is a **compiled, schema-validated photo estimate**, not a generic image caption. It separates observed evidence, inferred food identity, edible mass ranges, unknowns and questions before the Agent performs local food-library matching. A photograph alone never creates a measured food weight.
 
-> **Experimental branch:** `experiment/agent-first-quick-log` · **not yet part of main**. Existing v5.1 behavior is retained unless stated below.
+> **Merged into `main`** together with authenticated remote Streamable HTTP MCP. Existing v5.1 safety behavior is preserved; advanced features are available without changing branches.
 
 MCP is the product interface. These features require **no dashboard UI**:
 
@@ -180,7 +180,7 @@ Nutrition-Tracker-MCP/
 
 ## Remote MCP (optional)
 
-The experimental branch adds **authenticated Streamable HTTP MCP** on a separate `MCP_HTTP_PORT` (default 3457), while retaining local stdio and keeping Dashboard HTTP private. Remote MCP is **disabled by default**. It requires `MCP_HTTP_ENABLED=1`, a strong `MCP_HTTP_TOKEN`, TLS reverse proxy for off-machine access, and strict Host/Origin allowlists. No OAuth or multi-user isolation is provided. **See the [Chinese remote MCP / NAS deployment guide](docs/REMOTE_MCP_DEPLOYMENT_ZH.md)** for Docker Compose, Caddy, credentials, and Agent connection settings.
+The main branch now includes **authenticated Streamable HTTP MCP** on a separate `MCP_HTTP_PORT` (default 3457), while retaining local stdio and keeping Dashboard HTTP private. Remote MCP is **disabled by default**. It requires `MCP_HTTP_ENABLED=1`, a strong `MCP_HTTP_TOKEN`, TLS reverse proxy for off-machine access, and strict Host/Origin allowlists. No OAuth or multi-user isolation is provided. **See the [Chinese remote MCP / NAS deployment guide](docs/REMOTE_MCP_DEPLOYMENT_ZH.md)** for Docker Compose, Caddy, credentials, and Agent connection settings.
 
 ## MCP integration
 
