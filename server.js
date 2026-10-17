@@ -129,33 +129,43 @@ app.post("/api/mcp-dispatch", authorizeDispatch, (req, res) => {
   }
 });
 
-// 兼容 iOS 快捷指令 / Health Auto Export / Health Connect：字段都可选
-app.post("/api/health-webhook", authorizeWebhook, (req, res) => {
-  const b = req.body || {};
-  const num = (v) => (v === undefined || v === null || v === "" ? undefined : Number(v));
-  try {
-    // Household imports require explicit member attribution; never silently write to legacy single-person DB.
-    if (household && !b.memberId) return res.status(400).json({ok:false,error:"memberId required in household mode"});
-    if (!household && b.memberId) return res.status(400).json({ok:false,error:"memberId requires household mode"});
-    const args = {
-      scaleWeightKg: num(b.weightKg ?? b.scaleWeightKg),
-      measuredAt: b.measuredAt,
-      sourceEventId: b.sourceEventId,
-      hrvMetric: b.hrvMetric,
-      hrvMs: num(b.hrvMs),
-      rhrBpm: num(b.rhrBpm),
-      sleepHours: num(b.sleepHours),
-      deepSleepPct: num(b.deepSleepPct),
-      steps: num(b.steps),
-      activeKcal: num(b.activeKcal)
+// Existing private NAS webhook also accepts a bounded batch from one member's phone.
+// Each event has an independent idempotency key. No new accounts or device auth system.
+const healthNumber = v => v === undefined || v === null || v === "" ? undefined : Number(v);
+function parseHealthReading(b) {
+  return {scaleWeightKg:healthNumber(b.weightKg??b.scaleWeightKg),
+    measuredAt:b.measuredAt,sourceEventId:b.sourceEventId,hrvMetric:b.hrvMetric,
+    hrvMs:healthNumber(b.hrvMs),rhrBpm:healthNumber(b.rhrBpm),sleepHours:healthNumber(b.sleepHours),
+    deepSleepPct:healthNumber(b.deepSleepPct),steps:healthNumber(b.steps),activeKcal:healthNumber(b.activeKcal)};
+}
+app.post("/api/health-webhook", authorizeWebhook, (req,res)=>{
+  const b=req.body||{};
+  try{
+    if(household && !b.memberId)return res.status(400).json({ok:false,error:"memberId required in household mode"});
+    if(!household && b.memberId)return res.status(400).json({ok:false,error:"memberId requires household mode"});
+    if(household)household.member(b.memberId); // reject invalid member before processing a batch
+    const write=(reading)=>{
+      const args=parseHealthReading(reading);
+      return household?household.memberTool(b.memberId,"log_morning_checkin",args):
+        run("log_morning_checkin",args,b.source?`HEALTH_WEBHOOK:${b.source}`:"HEALTH_WEBHOOK");
     };
-    const result = household
-      ? household.memberTool(b.memberId,"log_morning_checkin",args)
-      : run("log_morning_checkin",args,b.source ? `HEALTH_WEBHOOK:${b.source}` : "HEALTH_WEBHOOK");
-    res.json({ ok: true, ...result });
-  } catch (e) {
-    res.status(e instanceof ToolError ? 400 : 500).json({ ok: false, error: e.message });
-  }
+    if(!Object.hasOwn(b,'events'))return res.json({ok:true,...write(b)}); // legacy single payload
+    if(!Array.isArray(b.events)||b.events.length<1||b.events.length>30)
+      return res.status(400).json({ok:false,error:"events must contain 1–30 readings"});
+    const results=b.events.map((reading,index)=>{
+      try{
+        if(!reading||typeof reading!=='object'||Array.isArray(reading))throw Error("invalid reading");
+        if(!reading.sourceEventId||typeof reading.sourceEventId!=='string')throw Error("sourceEventId required per event");
+        if(!reading.measuredAt||typeof reading.measuredAt!=='string')throw Error("measuredAt required per event");
+        if(!['weightKg','scaleWeightKg','hrvMs','rhrBpm','sleepHours','deepSleepPct','steps','activeKcal']
+          .some(key=>reading[key]!==undefined&&reading[key]!==null&&reading[key]!==''))throw Error("reading has no measurement");
+        return {index,ok:true,...write(reading)};
+      }catch(e){return {index,ok:false,error:e.message};}
+    });
+    const succeeded=results.filter(x=>x.ok),failed=results.length-succeeded.length;
+    return res.status(failed?207:200).json({ok:failed===0,partial:failed>0,
+      succeeded:succeeded.length,failed,memberId:b.memberId??null,results});
+  }catch(e){return res.status(400).json({ok:false,error:e.message});}
 });
 
 const httpServer = app.listen(PORT, HOST, () => log(`观察窗 http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}  DB=${path.basename(DB_PATH)}${DEMO ? " (demo)" : ""}`));
@@ -209,7 +219,20 @@ function createMcpServer() {
       inputSchema:{
         memberId:z.string().optional().describe('Required for writes to a household member; no individual credentials'),
         operation:z.enum(['meal','quick_meal','checkin','health_observation','correction','recent_correction','photo_stage','photo_confirm','photo_discard','template_save','template_log','supplement','plan','profile','intake_complete','food_add','acknowledge','advanced']),
-        args:z.record(z.unknown()).default({}).describe('Validated by existing engine; photo estimates use nutrition.photo_estimate.v1 via MCP prompt'),
+        args:z.object({
+          mealSlot:z.string().optional(),source:z.enum(['text']).optional(),
+          requestId:z.string().min(1).optional(),date:z.string().optional(),
+          foodName:z.string().optional(),weightGrams:z.number().positive().optional(),
+          mealId:z.string().optional(),expectedRevision:z.number().int().min(0).optional(),
+          items:z.array(z.object({name:z.string().optional(),foodId:z.string().optional(),
+            weightGrams:z.number().positive(),p:z.number().min(0).optional(),
+            c:z.number().min(0).optional(),f:z.number().min(0).optional()}).passthrough()).optional(),
+          sleepHours:z.number().min(0).max(24).optional(),rhrBpm:z.number().positive().optional(),
+          hrvMs:z.number().positive().optional(),measuredAt:z.string().optional(),
+          sourceEventId:z.string().optional(),kind:z.string().optional(),
+          systolic:z.number().optional(),diastolic:z.number().optional(),
+          value:z.number().optional(),note:z.string().optional(),
+        }).passthrough().default({}).describe('Typed frequent meal/correction/checkin fields; rare photo and advanced fields pass through to the unchanged engine-specific validator'),
         tool:z.string().optional().describe('Only with operation=advanced; exact underlying engine mutation name'),
         includeContext:z.boolean().default(true).describe('For meal/checkin/health/correction, include brief updated state so no follow-up query is needed')
       }

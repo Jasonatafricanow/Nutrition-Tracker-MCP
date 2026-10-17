@@ -22,6 +22,10 @@
 
 The Dashboard initially exposes existing professional nutrition, recovery and trend views. Users can switch to a simpler everyday view at any time **without deleting data or changing the underlying calculations**. This is a voluntary presentation preference: do not automatically infer user disengagement or apply a clinical/programmatic downgrade. Everyday tracking still supports fast meals, sleep, weight and activity. For meal text the Agent may save an explicitly labeled estimate in one user turn; **for meal photos it must first show a brief food-identification and portion preview and obtain one combined approval before saving**. See [the product pivot decision](docs/PRODUCT_STRATEGY_AGENT_FIRST_ZH.md).
 
+## Device sync and typed Agent calls
+
+The existing private `POST /api/health-webhook` accepts a single payload as before, or a bounded 1–30 event batch: `{memberId:"alex",events:[{measuredAt:"...",sourceEventId:"stable-device-event-id",sleepHours:6.5}]}`. Each event is separately deduplicated and returns its own status, with HTTP 207 for partial failures. Household batches require a valid member ID and never silently fall back to the legacy single-person ledger. No device account infrastructure is introduced. Default MCP write tool stays one `nutrition_execute`, with typed high-frequency nested arguments; rare actions pass through to existing engine validation.
+
 ## Next iteration: fast correction, family meals and brief feedback
 
 - **Fix the last meal without IDs:** `nutrition_execute({operation:"recent_correction",memberId:"alex",args:{foodName:"米饭",weightGrams:220,requestId:"fix-once"}})` finds an unambiguous recent item, updates it with versioned audit, and refuses ambiguous names.
