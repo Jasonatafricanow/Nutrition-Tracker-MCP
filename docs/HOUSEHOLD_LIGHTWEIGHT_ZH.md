@@ -33,6 +33,7 @@
 
 ## 两个工具的日常用法
 
+- 普通用户默认一句话记餐：`nutrition_execute({memberId:'adult_a',operation:'quick_meal',args:{mealSlot:'午餐',source:'text',items:[{name:'米饭',weightGrams:150,foodId:'f7'}],requestId:'unique-meal-event'}})`，注明估算、可改。不必逐项确认估重。照片在用户明确要求记录时也可 `source:'photo'`；严格照片草稿确认仍可选。
 - 家庭晚餐：`nutrition_query({view:'household',focus:'food'})` 一次读取成员健身营养目标及每日剩余额度，Agent 对同桌菜品建议个性化份量；普通模式成员不会被强加高低碳计划。
 - 健康观察：`nutrition_query({view:'household',focus:'health'})` 一次读取最近已记录的睡眠、HRV、静息心率、活动、体重、血压、体温、血糖、少量值得注意的变化。不是临床诊断。不需要全量历史。
 - 个人记录：`nutrition_execute({memberId:'adult_a',operation:'checkin',args:{sleepHours:6.5,rhrBpm:60}})`，返回简短最新状态，通常不需再次请求工具。

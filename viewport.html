@@ -518,13 +518,13 @@
       $("meal-tbody").innerHTML = s.meals.length ? s.meals.map((m) => `
         <tr>
           <td class="muted">${esc(m.slot)}</td>
-          <td>${esc(m.name)}</td>
+          <td>${esc(m.name)}${m.source_kind?.includes('estimate')?' <small class="muted">· 估算</small>':''}</td>
           <td class="r">${m.weight_g}</td>
           <td class="r">${m.p}</td>
           <td class="r">${m.c}</td>
           <td class="r">${m.f}</td>
           <td class="r"><b>${kcalOf(m)}</b></td>
-          <td class="r"><button class="linkbtn" onclick="delMeal('${esc(m.id)}')" aria-label="删除 ${esc(m.name)}">删除</button></td>
+          <td class="r"><button class="linkbtn" onclick="editMeal('${esc(m.id)}',${m.revision??0},${m.weight_g})" aria-label="校准 ${esc(m.name)}">校准</button> <button class="linkbtn" onclick="delMeal('${esc(m.id)}')" aria-label="删除 ${esc(m.name)}">删除</button></td>
         </tr>`).join("") : `<tr><td colspan="8" class="muted" style="padding:24px 0">今天还没有记录。选一样食材、填克重，点"记录"。</td></tr>`;
       fillSelect($("meal-slot"), s.mealSlots.map((x) => [x, x]));
       fillSelect($("food-select"), s.foods.map((f) => [f.id, `${f.name}　${Math.round(f.p * 4 + f.c * 4 + f.f * 9)} 千卡 · 蛋白 ${f.p} 碳水 ${f.c} 脂肪 ${f.f}`]));
@@ -675,6 +675,15 @@
     const cycleDay = (dayIndex, plan) => dispatch("update_weekly_schedule", { dayIndex, plan });
     const toggleSupp = (supplementId, taken) => dispatch("update_supplement_stack", { supplementId, taken });
     const delMeal = (mealId) => dispatch("delete_meal_item", { mealId });
+    async function editMeal(mealId,expectedRevision,currentGrams) {
+      const typed=prompt("修改食物估算份量（克），保留原记录和修改历史",String(currentGrams));
+      if(typed===null)return;
+      const weightGrams=Number(typed);
+      if(!Number.isFinite(weightGrams)||weightGrams<=0||weightGrams>5000)return toast("请输入合理的克重");
+      const requestId="ui-edit-"+Date.now()+"-"+Math.random().toString(36).slice(2);
+      const result=await dispatch("update_meal_item",{mealId,expectedRevision,requestId,weightGrams,portionSource:"user_estimate"});
+      if(result?.ok)toast("份量已校准，历史修改记录已保留");
+    }
     async function calibrate() {
       const r = await dispatch("calibrate_metabolic_tdee", { windowDays: 14 });
       toast(r?.ok ? r.diagnosticNote : (r?.reason || "无法计算校准"));

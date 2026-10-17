@@ -120,7 +120,10 @@ app.post("/api/health-webhook", authorizeWebhook, (req, res) => {
   const b = req.body || {};
   const num = (v) => (v === undefined || v === null || v === "" ? undefined : Number(v));
   try {
-    const result = run("log_morning_checkin", {
+    // Household imports require explicit member attribution; never silently write to legacy single-person DB.
+    if (household && !b.memberId) return res.status(400).json({ok:false,error:"memberId required in household mode"});
+    if (!household && b.memberId) return res.status(400).json({ok:false,error:"memberId requires household mode"});
+    const args = {
       scaleWeightKg: num(b.weightKg ?? b.scaleWeightKg),
       measuredAt: b.measuredAt,
       sourceEventId: b.sourceEventId,
@@ -131,7 +134,10 @@ app.post("/api/health-webhook", authorizeWebhook, (req, res) => {
       deepSleepPct: num(b.deepSleepPct),
       steps: num(b.steps),
       activeKcal: num(b.activeKcal)
-    }, b.source ? `HEALTH_WEBHOOK:${b.source}` : "HEALTH_WEBHOOK");
+    };
+    const result = household
+      ? household.memberTool(b.memberId,"log_morning_checkin",args)
+      : run("log_morning_checkin",args,b.source ? `HEALTH_WEBHOOK:${b.source}` : "HEALTH_WEBHOOK");
     res.json({ ok: true, ...result });
   } catch (e) {
     res.status(e instanceof ToolError ? 400 : 500).json({ ok: false, error: e.message });
@@ -184,10 +190,10 @@ function createMcpServer() {
       }
     },compactCall(compact.query));
     mcp.registerTool('nutrition_execute', {
-      description:'ONE validated write for one member. operations: meal (args {mealSlot,items:[{foodId,weightGrams}],requestId}), checkin (sleepHours/rhrBpm/hrvMs/...); health_observation (kind,value/systolic/diastolic); correction, photo_stage, photo_confirm, template_save, template_log, supplement, plan, profile, intake_complete, food_add, acknowledge. Other rare engine write: advanced+tool. Never infer measurements, confirm before food/photo writes.',
+      description:'ONE write: default quick_meal({mealSlot,source:text|photo,requestId,items:[{name,weightGrams,foodId? OR p,c,f}]}) saves labeled estimates without a second user confirmation; correction updates a prior record. For strict measured logging use meal; optional strict photo review uses photo_stage/photo_confirm. Also checkin, health_observation, template, supplement and plan. Do not claim estimates are measurements.',
       inputSchema:{
         memberId:z.string().optional().describe('Required for writes to a household member; no individual credentials'),
-        operation:z.enum(['meal','checkin','health_observation','correction','photo_stage','photo_confirm','photo_discard','template_save','template_log','supplement','plan','profile','intake_complete','food_add','acknowledge','advanced']),
+        operation:z.enum(['meal','quick_meal','checkin','health_observation','correction','photo_stage','photo_confirm','photo_discard','template_save','template_log','supplement','plan','profile','intake_complete','food_add','acknowledge','advanced']),
         args:z.record(z.unknown()).default({}).describe('Validated by existing engine; photo estimates use nutrition.photo_estimate.v1 via MCP prompt'),
         tool:z.string().optional().describe('Only with operation=advanced; exact underlying engine mutation name'),
         includeContext:z.boolean().default(true).describe('For meal/checkin/health/correction, include brief updated state so no follow-up query is needed')

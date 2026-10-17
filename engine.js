@@ -303,6 +303,21 @@ export const TOOL_DEFS = {
       schedule: z.array(z.object({ plan: carbLevel, focus: z.string() })).length(7).optional()
     }
   },
+  log_estimated_meal: {
+    description: "普通用户一句话/照片明确要求记餐时，允许估算直接入账。保存来源、估算份量及审计记录；勿把估算称为实测。严格照片审核仍可选用。",
+    shape: {
+      mealSlot: z.enum(MEAL_SLOTS),
+      date: calendarDate.optional(),
+      source: z.enum(["text","photo"]),
+      requestId: z.string().trim().min(1).max(128).describe("这次记录的稳定 ID；网络重试使用同一个"),
+      items: z.array(z.object({
+        name: z.string().trim().min(1).max(120),
+        weightGrams: z.number().positive().max(5000),
+        foodId: z.string().optional().describe("仅使用食材库实际查得的 ID"),
+        p: z.number().min(0).optional(),c: z.number().min(0).optional(),f: z.number().min(0).optional()
+      })).min(1).max(30)
+    }
+  },
   log_meal_items: {
     description: "Agent 记录今天或历史某天一餐。优先 search_foods 获取 foodId；用户需确认份量。requestId 可防止网络重试重复记账。不会自动标记全天摄入完整。",
     shape: {
@@ -693,12 +708,12 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         }
       }
       ensureLedger(date);
-      const ins = q("INSERT INTO meal_logs (id, date, slot, name, weight_g, p, c, f, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      const ins = q("INSERT INTO meal_logs (id, date, slot, name, weight_g, p, c, f, created_at, source_kind, portion_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       const ids = [];
       for (const r of rows) {
         if (r.p + r.c + r.f > r.w * 1.001) throw new ToolError("营养素总质量不能超过食物份量");
         const id = "m_" + randomUUID();
-        ins.run(id,date,slot,r.name,r.w,r.p,r.c,r.f,nowIso());
+        ins.run(id,date,slot,r.name,r.w,r.p,r.c,r.f,nowIso(),r.sourceKind??null,r.portionSource??null);
         ids.push(id);
       }
       recalcIntake(date); // History edits must also invalidate intake_complete.
@@ -1092,6 +1107,31 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       });
       const desc = a.schedule ? "整周排期已替换" : `${DAY_NAMES[a.dayIndex]} 改为 ${a.plan.toUpperCase()}`;
       return { result: { ok: true, schedule: getSchedule() }, summary: `周排期更新：${desc}` };
+    },
+
+    log_estimated_meal(a) {
+      // Low-friction path: user's request to LOG authorizes an explicitly estimated entry.
+      // No extra confirmation turn. Provenance remains visible and corrections are audited.
+      const date=a.date??today();
+      const rows=a.items.map(it=>{
+        let macros;
+        if(it.foodId){
+          const food=q("SELECT id,name,p,c,f FROM foods WHERE id=?").get(it.foodId);
+          if(!food)throw new ToolError("没有匹配的食材库 ID");
+          if(it.p!=null||it.c!=null||it.f!=null)throw new ToolError("匹配食材库时不要混入独立估算营养值");
+          const factor=it.weightGrams/100;
+          macros={p:round1(food.p*factor),c:round1(food.c*factor),f:round1(food.f*factor)};
+        }else{
+          if([it.p,it.c,it.f].some(x=>x==null))throw new ToolError("无 foodId 时需要完整的估算 p/c/f");
+          macros={p:it.p,c:it.c,f:it.f};
+        }
+        return {name:it.name,w:it.weightGrams,...macros,
+          sourceKind:a.source==='photo'?'agent_photo_estimate':'agent_text_estimate',
+          portionSource:a.source==='photo'?'visual_estimate':'user_estimate'};
+      });
+      const result=commitMeal({toolName:"log_estimated_meal",requestId:a.requestId,payload:a,date,slot:a.mealSlot,rows});
+      return {result:{...result,estimated:true,provenance:a.source,editable:true},
+        summary:result.duplicate?null:`估算记账 ${date}【${a.mealSlot}】共 ${rows.length} 项，可纠错`};
     },
 
     log_meal_items(a) {
