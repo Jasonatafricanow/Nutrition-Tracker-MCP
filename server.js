@@ -12,6 +12,7 @@ import { createEngine, TOOL_DEFS, ToolError } from "./engine.js";
 import { PHOTO_ESTIMATION_PROMPT } from "./photo-estimation.js";
 import { AGENT_WORKFLOW, AGENT_WORKFLOW_VERSION } from "./agent-workflow.js";
 import { createUSDAClient } from "./usda-foods.js";
+import {createOpenFoodFactsClient} from "./open-food-facts.js";
 import { z } from "zod";
 import { startRemoteMcp } from "./remote-mcp.js";
 import { createHousehold } from "./household.js";
@@ -34,6 +35,7 @@ const household = process.env.HOUSEHOLD_CONFIG ? createHousehold({
   engineFactory: createEngine
 }) : null;
 const usda = createUSDAClient();
+const openFoodFacts = createOpenFoodFactsClient();
 const csrfToken = randomBytes(32).toString("hex");
 const apiToken = process.env.NUTRITION_API_TOKEN;
 const webhookToken = process.env.HEALTH_WEBHOOK_TOKEN;
@@ -178,7 +180,7 @@ setInterval(() => {
 
 // ==================== MCP ====================
 function createMcpServer() {
-  const compact=createAgentInterface({engine,household,usda});
+  const compact=createAgentInterface({engine,household,usda,openFoodFacts});
   const fullSurface=process.env.MCP_TOOL_SURFACE==='full';
   const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.4.0-household.2" });
 
@@ -188,14 +190,15 @@ function createMcpServer() {
   };
   if (!fullSurface) {
     mcp.registerTool('nutrition_query', {
-      description:'Read only what this conversation needs. household/member: short daily summary; foods: 1–6 local food searches in ONE call; meals/history; health_history; templates; photo_draft; capabilities (lazy advanced discovery). Never call get_snapshot for normal chat.',
+      description:'Focused reads: household health/food context; foods (1–6 queries); barcode Open Food Facts packaging lookup; family_recipes saved household meal snapshots; report (7/30 days); meals/history; photo_draft; capabilities. External barcode values are candidates, NOT local food IDs.',
       inputSchema:{
-        view:z.enum(['household','member','foods','meals','health_history','templates','photo_draft','capabilities','nutrition_detail']).default('household'),
+        view:z.enum(['household','member','foods','barcode','family_recipes','report','meals','health_history','templates','photo_draft','capabilities','nutrition_detail']).default('household'),
         memberId:z.string().optional().describe('Required for personal queries in household mode; absent for whole-family overview'),
         focus:z.enum(['daily','food','health','all']).default('daily'),
         queries:z.array(z.string()).max(6).optional().describe('Foods: up to six food names together, one MCP call'),
         query:z.string().optional().describe('Single food search / template keyword; for nutrition_detail, exact read tool name'),
         date:z.string().optional(),days:z.number().int().min(1).max(90).default(14),
+        barcode:z.string().optional().describe('Barcode lookup: 8–14 digits; preserves leading zeroes; read-only external reference'),
         limit:z.number().int().min(1).max(10).default(5),draftId:z.string().optional(),
         domain:z.enum(['daily','photo','planning','history','extras']).optional(),
         source:z.enum(['local','usda']).optional()
