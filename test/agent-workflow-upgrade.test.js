@@ -91,7 +91,7 @@ test('workflow explicitly routes photo, correction, USDA and confirmation throug
 });
 test('real stdio MCP client discovers workflow prompt and optional read-only USDA tools',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'nutrition-agent-e2e-'));const client=new Client({name:'workflow-test',version:'1.0'});
- const transport=new StdioClientTransport({command:process.execPath,args:[path.join(root,'server.js')],env:{...process.env,DB_PATH:path.join(dir,'state.db'),NUTRITION_TIME_ZONE:'Asia/Shanghai',PORT:'0',FDC_API_KEY:''}});
+ const transport=new StdioClientTransport({command:process.execPath,args:[path.join(root,'server.js')],env:{...process.env,MCP_TOOL_SURFACE:"full",DB_PATH:path.join(dir,'state.db'),NUTRITION_TIME_ZONE:'Asia/Shanghai',PORT:'0',FDC_API_KEY:''}});
  try{await client.connect(transport);
  const tools=await client.listTools();for(const name of ['update_meal_item','get_meal_corrections','search_usda_foods','get_usda_food_details','get_agent_workflow'])assert.ok(tools.tools.some(t=>t.name===name),name);
  const prompts=await client.listPrompts();assert.ok(prompts.prompts.some(p=>p.name==='nutrition_agent_workflow'));

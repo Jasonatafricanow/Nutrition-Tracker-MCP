@@ -14,6 +14,9 @@ import { AGENT_WORKFLOW, AGENT_WORKFLOW_VERSION } from "./agent-workflow.js";
 import { createUSDAClient } from "./usda-foods.js";
 import { z } from "zod";
 import { startRemoteMcp } from "./remote-mcp.js";
+import { createHousehold } from "./household.js";
+import { createAgentInterface } from "./agent-interface.js";
+import { COMPACT_AGENT_WORKFLOW } from "./compact-agent-workflow.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = process.argv.includes("--demo");
@@ -25,6 +28,11 @@ const USE_STDIO = !process.stdin.isTTY && !process.argv.includes("--no-stdio");
 
 const log = (...a) => console.error("[Nutrition Tracker MCP]", ...a); // stdout 留给 MCP 协议
 const engine = createEngine(DB_PATH, { demo: DEMO });
+const household = process.env.HOUSEHOLD_CONFIG ? createHousehold({
+  configPath: path.resolve(process.env.HOUSEHOLD_CONFIG),
+  dir: path.resolve(process.env.HOUSEHOLD_DATA_DIR || path.join(__dirname, "household-data")),
+  engineFactory: createEngine
+}) : null;
 const usda = createUSDAClient();
 const csrfToken = randomBytes(32).toString("hex");
 const apiToken = process.env.NUTRITION_API_TOKEN;
@@ -82,6 +90,11 @@ app.get("/api/session", (req,res) => {
 });
 
 app.get("/api/snapshot", (req, res) => res.json(engine.buildSnapshot()));
+app.get("/api/household", (req,res)=> {
+  if (!household) return res.status(404).json({error:"Household mode disabled"});
+  if (!sameOrigin(req)) return res.status(403).json({error:"Origin denied"});
+  try {res.json(household.context());} catch(e){res.status(500).json({error:"Household unavailable"});}
+});
 
 app.get("/api/stream", (req, res) => {
   res.writeHead(200, {
@@ -147,8 +160,42 @@ setInterval(() => {
 
 // ==================== MCP ====================
 function createMcpServer() {
-  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.3.0-beta.1" });
+  const compact=createAgentInterface({engine,household,usda});
+  const fullSurface=process.env.MCP_TOOL_SURFACE==='full';
+  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.4.0-household.2" });
 
+  const compactCall = (fn)=>async(args)=>{
+    try {return {content:[{type:'text',text:JSON.stringify(await fn(args))}]};}
+    catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}
+  };
+  if (!fullSurface) {
+    mcp.registerTool('nutrition_query', {
+      description:'Read only what this conversation needs. household/member: short daily summary; foods: 1–6 local food searches in ONE call; meals/history; health_history; templates; photo_draft; capabilities (lazy advanced discovery). Never call get_snapshot for normal chat.',
+      inputSchema:{
+        view:z.enum(['household','member','foods','meals','health_history','templates','photo_draft','capabilities','nutrition_detail']).default('household'),
+        memberId:z.string().optional().describe('Required for personal queries in household mode; absent for whole-family overview'),
+        focus:z.enum(['daily','food','health','all']).default('daily'),
+        queries:z.array(z.string()).max(6).optional().describe('Foods: up to six food names together, one MCP call'),
+        query:z.string().optional().describe('Single food search / template keyword; for nutrition_detail, exact read tool name'),
+        date:z.string().optional(),days:z.number().int().min(1).max(90).default(14),
+        limit:z.number().int().min(1).max(10).default(5),draftId:z.string().optional(),
+        domain:z.enum(['daily','photo','planning','history','extras']).optional(),
+        source:z.enum(['local','usda']).optional()
+      }
+    },compactCall(compact.query));
+    mcp.registerTool('nutrition_execute', {
+      description:'ONE validated write for one member. operations: meal (args {mealSlot,items:[{foodId,weightGrams}],requestId}), checkin (sleepHours/rhrBpm/hrvMs/...); health_observation (kind,value/systolic/diastolic); correction, photo_stage, photo_confirm, template_save, template_log, supplement, plan, profile, intake_complete, food_add, acknowledge. Other rare engine write: advanced+tool. Never infer measurements, confirm before food/photo writes.',
+      inputSchema:{
+        memberId:z.string().optional().describe('Required for writes to a household member; no individual credentials'),
+        operation:z.enum(['meal','checkin','health_observation','correction','photo_stage','photo_confirm','photo_discard','template_save','template_log','supplement','plan','profile','intake_complete','food_add','acknowledge','advanced']),
+        args:z.record(z.unknown()).default({}).describe('Validated by existing engine; photo estimates use nutrition.photo_estimate.v1 via MCP prompt'),
+        tool:z.string().optional().describe('Only with operation=advanced; exact underlying engine mutation name'),
+        includeContext:z.boolean().default(true).describe('For meal/checkin/health/correction, include brief updated state so no follow-up query is needed')
+      }
+    },compactCall(compact.execute));
+  }
+
+  if (fullSurface) {
   for (const [name, def] of Object.entries(TOOL_DEFS)) {
     mcp.registerTool(name, { description: def.description, inputSchema: def.shape }, async (args) => {
       try {
@@ -157,6 +204,38 @@ function createMcpServer() {
         return { isError: true, content: [{ type: "text", text: e.message }] };
       }
     });
+  }
+
+  if (household) {
+    const call=(fn)=>async(args)=>{try {return {content:[{type:'text',text:JSON.stringify(fn(args))}]};}
+      catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}};
+    mcp.registerTool('get_household_context', {
+      description:'Get a small unified snapshot of household health, training and meal context for ordinary Agent conversations. No separate household login.',
+      inputSchema:{days:z.number().int().min(3).max(30).default(14)}
+    },call(args=>household.context(args)));
+    mcp.registerTool('member_nutrition_tool', {
+      description:'Run an EXISTING Nutrition Tracker tool for the named family member. memberId is data attribution, not an account login. The underlying nutrition engine validates all tool arguments.',
+      inputSchema:{memberId:z.string(),tool:z.enum(Object.keys(TOOL_DEFS)),args:z.record(z.unknown()).default({})}
+    },call(args=>household.memberTool(args.memberId,args.tool,args.args)));
+    mcp.registerTool('log_household_observation', {
+      description:'Record a household member blood-pressure, temperature, glucose or symptom observation; no disease inference.',
+      inputSchema:{memberId:z.string(),kind:z.enum(['blood_pressure','temperature_c','glucose_mg_dl','symptom_note']),
+        observedAt:z.string().optional(),note:z.string().max(500).optional(),sourceEventId:z.string().optional(),
+        systolic:z.number().optional(),diastolic:z.number().optional(),value:z.number().optional()}
+    },call(args=>household.logObservation(args)));
+    mcp.registerTool('get_household_observations', {
+      description:'Read member health observations, including optional symptom notes, inside the trusted household.',
+      inputSchema:{memberId:z.string(),days:z.number().int().min(1).max(90).default(14)}
+    },call(args=>({ok:true,memberId:args.memberId,observations:household.observations(args.memberId,args.days)})));
+    mcp.registerTool('acknowledge_household_note', {
+      description:'Call only AFTER mentioning an optional wellness observation to the user; suppress repeats for two days, not a notification scheduler.',
+      inputSchema:{memberId:z.string(),signal:z.enum(['short_sleep','rhr_change'])}
+    },call(args=>household.acknowledge(args.memberId,args.signal)));
+    mcp.registerPrompt('household_agent_use',{
+      title:'Use household health and nutrition context naturally',
+      description:'Shared NAS household, no member account gates; reuse existing personal nutrition tools.'
+    },async()=>({messages:[{role:'user',content:{type:'text',text:
+      'This NAS is trusted by the household. For family dinner, fetch get_household_context, use existing member nutrition targets only for performance-mode people, and suggest shared dishes with per-person portions. For wellness questions, use recorded sleep, heart rate, activity, weight and observations. An optional noteworthy change can be mentioned briefly if relevant; call acknowledge_household_note only after actually mentioning it. Do not repeat recently mentioned hints. No unsolicited medical diagnosis, no need to turn ordinary concern into a clinical assessment. For personal food and health operations call member_nutrition_tool with the correct memberId. Do not infer missing measurements. Dashboard is a secondary family glance view.'}}]}));
   }
 
   mcp.registerTool('get_agent_workflow', {
@@ -180,11 +259,13 @@ function createMcpServer() {
     catch(e){return {isError:true,content:[{type:'text',text:String(e.message)}]};}
   });
 
+  } // full legacy tool surface
+
   mcp.registerPrompt('nutrition_agent_workflow', {
     title:'Agent-first nutrition logging workflow',
     description:'Route text meals, photos, corrections and external food search into validated MCP operations.'
-  },async()=>({description:AGENT_WORKFLOW_VERSION,
-    messages:[{role:'user',content:{type:'text',text:AGENT_WORKFLOW}}]}));
+  },async()=>({description:fullSurface?AGENT_WORKFLOW_VERSION:'nutrition.compact_workflow.v1',
+    messages:[{role:'user',content:{type:'text',text:fullSurface?AGENT_WORKFLOW:COMPACT_AGENT_WORKFLOW}}]}));
 
   // MCP prompt: external vision Agent sees the user's image; this server supplies
   // the compilation protocol and validates the resulting JSON via stage_photo_estimate.

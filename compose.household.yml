@@ -1,0 +1,11 @@
+# Compose overlay for one trusted household NAS, no per-member login or grants.
+# First: cp household.example.json household.json; edit member names/timezone.
+# Start: docker compose -f compose.remote.yml -f compose.household.yml up -d --build
+services:
+  nutrition-mcp:
+    environment:
+      HOUSEHOLD_CONFIG: /config/household.json
+      HOUSEHOLD_DATA_DIR: /data/household
+      MCP_TOOL_SURFACE: compact
+    volumes:
+      - ./household.json:/config/household.json:ro

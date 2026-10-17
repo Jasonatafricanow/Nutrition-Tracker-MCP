@@ -10,3 +10,8 @@ benchmark/private
 coverage
 *.zip
 .github
+household-data
+household.json
+
+# Private household member names / config
+household.json
