@@ -159,7 +159,7 @@ app.post("/api/health-webhook", authorizeWebhook, (req,res)=>{
         if(!reading.measuredAt||typeof reading.measuredAt!=='string')throw Error("measuredAt required per event");
         if(!['weightKg','scaleWeightKg','hrvMs','rhrBpm','sleepHours','deepSleepPct','steps','activeKcal']
           .some(key=>reading[key]!==undefined&&reading[key]!==null&&reading[key]!==''))throw Error("reading has no measurement");
-        return {index,...write(reading)};
+        return {index,ok:true,...write(reading)};
       }catch(e){return {index,ok:false,error:e.message};}
     });
     const succeeded=results.filter(x=>x.ok),failed=results.length-succeeded.length;
