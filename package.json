@@ -1,6 +1,6 @@
 {
   "name": "nutrition-tracker-mcp",
-  "version": "5.4.0-household.2",
+  "version": "5.5.0-household.0",
   "private": true,
   "description": "Agent-first MCP nutrition ledger: fast meal logging, reusable templates, local-first tracking and cautious TDEE calibration",
   "type": "module",

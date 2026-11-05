@@ -12,6 +12,38 @@
 
 ---
 
+## Current version: v5.5 everyday-first Agent surface
+
+The primary Agent interface still contains **two MCP tools**, but the default
+product contract now contains only **three read intents** (`summary`, `meals`,
+`foods`) and **five write intents** (`meal`, `correct`, `health`,
+`photo_stage`, `photo_confirm`). This is a reduction in ordinary operations,
+not just a wrapper over 30 alternatives.
+
+`meal` combines estimated text logging and measured food-ID entries.
+`correct` combines natural recent corrections and ID/revision-based edits.
+`health` combines ordinary check-ins with source-specific household health
+observations; automatic phone/device data still enters via the original
+authenticated webhook. Photos still require preview and explicit approval.
+
+Migration profiles:
+
+~~~sh
+# Default: everyday, 3 read views + 5 write actions
+node server.js
+# Previous v5.4 compact surface (12 views + 18 actions)
+MCP_TOOL_SURFACE=compact node server.js
+# Original low-level engine tools for specialists and legacy clients
+MCP_TOOL_SURFACE=full node server.js
+~~~
+
+No schema migration or record deletion. Professional functions remain available
+on opt-in profiles or the Dashboard, but not in the default Agent operation
+catalog. See the [Chinese feature-pruning decision](docs/EVERYDAY_AGENT_SURFACE_ZH.md).
+**Real Agent task success and token/call savings have not yet been benchmarked.**
+
+---
+
 ## Portfolio overview
 
 **Problem:** for a person forming a health-management habit, a perfect nutritional record often costs more time than it returns. An Agent that asks several rounds of grams, recipes and portion questions may be *less* convenient than a mobile app.
@@ -22,7 +54,7 @@
 
 | Inspectable capability | Important implementation boundary |
 | --- | --- |
-| Two default tools: `nutrition_query` and `nutrition_execute` | Deterministic SQLite engine, typed frequent inputs, request deduplication and correction audit; legacy tools opt-in |
+| Two default tools with only 3 read intents and 5 write intents | Deterministic SQLite engine, typed frequent inputs, request deduplication and correction audit; legacy tools opt-in |
 | Estimated text/photo intake, saved meals, recent-meal correction | Photos interpreted by an external vision Agent and never stored on the NAS; no silent photo commits |
 | Family health overview, bounded device-data batch import, 7/30-day summaries | Shared household context with measurement timestamps; missing days do not mean zero |
 | Open Food Facts barcode and optional USDA references | External candidates are attributed and not auto-imported as verified local foods |
@@ -49,15 +81,15 @@ The existing private `POST /api/health-webhook` accepts a single payload as befo
 ## Implemented everyday workflows: correction, meals and feedback
 
 - **Fix the last meal without IDs:** `nutrition_execute({operation:"recent_correction",memberId:"alex",args:{foodName:"米饭",weightGrams:220,requestId:"fix-once"}})` finds an unambiguous recent item, updates it with versioned audit, and refuses ambiguous names.
-- **Reuse existing family meals:** save a regularly eaten meal with `template_save`; query all household members' saved templates using `nutrition_query({view:"family_recipes",query:"鸡肉"})` for portions and shared dinner planning. This reuses existing records and does **not** add an inventory subsystem.
-- **Read-only product barcode:** `nutrition_query({view:"barcode",barcode:"0123456789012"})` retrieves attributed packaging macros from Open Food Facts. Data is external crowdsourced reference, **not** a verified local `foodId`; review label before optional import.
-- **Weekly/monthly observations:** `nutrition_query({view:"report",memberId:"alex",days:7})` (or 30) reports only dates with observations. Missing dates are unknown, not zero.
+- **Reuse existing family meals:** save a regularly eaten meal with `template_save`; query all household members' saved templates using `nutrition_query({view:"family_recipes",query:"鸡肉"})` (opt-in compact profile) for portions and shared dinner planning. This reuses existing records and does **not** add an inventory subsystem.
+- **Read-only product barcode:** `nutrition_query({view:"barcode",barcode:"0123456789012"})` (opt-in compact profile) retrieves attributed packaging macros from Open Food Facts. Data is external crowdsourced reference, **not** a verified local `foodId`; review label before optional import.
+- **Weekly/monthly observations:** `nutrition_query({view:"summary",memberId:"alex",period:"7d"})` (or `30d`) reports only dates with observations. Missing dates are unknown, not zero.
 
-The feature set stays within two default MCP tools; real Agent call traces and NAS deployment are still to be validated. Open Food Facts uses ODbL terms: [API docs](https://openfoodfacts.github.io/documentation/docs/Product-Opener/api/) · [license/reuse terms](https://support.openfoodfacts.org/help/en-gb/12-api-data-reuse/94-are-there-conditions-to-use-the-api).
+The everyday contract stays within two default MCP tools and 3+5 intents; real Agent call traces and NAS deployment are still to be validated. Open Food Facts uses ODbL terms: [API docs](https://openfoodfacts.github.io/documentation/docs/Product-Opener/api/) · [license/reuse terms](https://support.openfoodfacts.org/help/en-gb/12-api-data-reuse/94-are-there-conditions-to-use-the-api).
 
 ## Household NAS architecture and compact Agent MCP
 
-The current `main` implementation rebuilds household features **from the pre-family v5.3 baseline**. The household is the trusted boundary; member IDs label data, not accounts. No family SaaS login, per-member Bearer tokens or repeated sharing consent flows. Two default MCP tools replace the exposed dozens of low-level operations; the existing nutrition engine remains authoritative. Full legacy tools are available only with `MCP_TOOL_SURFACE=full` for migration.
+The current implementation retains household features **from the pre-family v5.3 baseline**. The household is the trusted boundary; member IDs label data, not accounts. No family SaaS login, per-member Bearer tokens or repeated sharing consent flows. The everyday two-tool interface now exposes only 3 read intents and 5 write intents; the existing nutrition engine remains authoritative. The previous 12+18 compact contract is available with `MCP_TOOL_SURFACE=compact`, and original low-level tools with `MCP_TOOL_SURFACE=full`.
 
 **[家庭权限设计取舍及项目记录](docs/PROJECT_RECORD_ZH.md)** · **[中文部署、Agent 接入及使用场景](docs/HOUSEHOLD_LIGHTWEIGHT_ZH.md)** · Example configuration: [`household.example.json`](household.example.json) · Docker Compose overlay: [`compose.household.yml`](compose.household.yml).
 
@@ -65,10 +97,10 @@ The current `main` implementation rebuilds household features **from the pre-fam
 
 **Common Agent conversations (one or two tool calls):**
 
-- **Family meal:** “We have chicken, potatoes and greens. What can we cook tonight?” → `nutrition_query({view:"household",focus:"food"})` → shared meal with per-person portion differences, normal eaters unaffected by an athlete's carb cycle.
-- **Routine wellness:** “What has the family been like recently?” → `nutrition_query({view:"household",focus:"health"})` → recent sleep/HRV/resting heart rate/activity/weight and user-entered vitals; a relevant concern may be mentioned once naturally, not every turn.
-- **Daily check-in:** “Jo slept only five hours last night.” → `nutrition_execute({operation:"checkin",memberId:"jo",args:{sleepHours:5}})` → direct brief updated context, no second snapshot call.
-- **Food + logging:** “150g cooked rice and 180g chicken for Alex.” → batched `nutrition_query({view:"foods",memberId:"alex",queries:["cooked rice","chicken"]})` → verify food IDs and preparation → `nutrition_execute({operation:"meal",memberId:"alex",args:{mealSlot:"午餐",items:[...],requestId:"unique-meal"}})`.
+- **Family meal:** “We have chicken, potatoes and greens. What can we cook tonight?” → `nutrition_query({view:"summary",focus:"food"})` → shared meal with per-person portion differences, normal eaters unaffected by an athlete's carb cycle.
+- **Routine wellness:** “What has the family been like recently?” → `nutrition_query({view:"summary",focus:"health"})` → recent sleep/HRV/resting heart rate/activity/weight and user-entered vitals; a relevant concern may be mentioned once naturally, not every turn.
+- **Daily check-in:** “Jo slept only five hours last night.” → `nutrition_execute({operation:"health",memberId:"jo",args:{sleepHours:5}})` → direct brief updated context, no second snapshot call.
+- **Food + logging:** “150g cooked rice and 180g chicken for Alex.” → batched `nutrition_query({view:"foods",memberId:"alex",queries:["cooked rice","chicken"]})` → verify food IDs and preparation → `nutrition_execute({operation:"meal",memberId:"alex",args:{mealSlot:"午餐",source:"measured",items:[...],requestId:"unique-meal"}})`.
 - **Photo intake:** photo compiler MCP Prompt only on photo turns → ingredient matching → unconfirmed draft → user approval → confirmed write. Do not silently invent grams/macros.
 
 The compact tool catalog reduces repeated model tool-selection context, but real Agent accuracy must still be evaluated from conversation traces. The optional Dashboard adds a family overview with on-demand per-member meal correction; it is not the primary workflow.

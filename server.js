@@ -17,7 +17,9 @@ import { z } from "zod";
 import { startRemoteMcp } from "./remote-mcp.js";
 import { createHousehold } from "./household.js";
 import { createAgentInterface } from "./agent-interface.js";
+import { createEverydayInterface } from "./everyday-interface.js";
 import { COMPACT_AGENT_WORKFLOW } from "./compact-agent-workflow.js";
+import { EVERYDAY_AGENT_WORKFLOW } from "./everyday-agent-workflow.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = process.argv.includes("--demo");
@@ -190,15 +192,62 @@ setInterval(() => {
 
 // ==================== MCP ====================
 function createMcpServer() {
+  // Everyday is the product default; compact is the v5.4 migration profile;
+  // full preserves the original low-level engine tools for specialist users.
+  const surface=(process.env.MCP_TOOL_SURFACE||'everyday').trim().toLowerCase();
+  if(!['everyday','compact','full'].includes(surface))throw Error('Invalid MCP_TOOL_SURFACE');
   const compact=createAgentInterface({engine,household,usda,openFoodFacts});
-  const fullSurface=process.env.MCP_TOOL_SURFACE==='full';
-  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.4.0-household.2" });
+  const everyday=createEverydayInterface(compact);
+  const fullSurface=surface==='full';
+  const mcp = new McpServer({ name: "nutrition-tracker-mcp", version: "5.5.0-household.0" });
 
   const compactCall = (fn)=>async(args)=>{
     try {return {content:[{type:'text',text:JSON.stringify(await fn(args))}]};}
     catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}
   };
-  if (!fullSurface) {
+  if (surface==='everyday') {
+    mcp.registerTool('nutrition_query', {
+      description:'Everyday nutrition reads. summary = today or observed-data 7d/30d report; meals = a dated meal ledger for review/correction; foods = one batch of 1–6 LOCAL food names. For specialist tools use the opt-in compact/full profile.',
+      inputSchema:{
+        view:z.enum(['summary','meals','foods']).default('summary'),
+        memberId:z.string().optional().describe('Member attribution in household mode, required for personal 7d/30d report'),
+        period:z.enum(['today','7d','30d']).default('today').describe('Only summary uses 7d/30d; missing records stay unknown'),
+        focus:z.enum(['daily','food','health']).default('daily').describe('Today summary category'),
+        date:z.string().optional().describe('Exact YYYY-MM-DD for meals'),
+        queries:z.array(z.string()).min(1).max(6).optional().describe('Local food names for foods view'),
+        limit:z.number().int().min(1).max(5).default(5)
+      }
+    },compactCall(everyday.query));
+    mcp.registerTool('nutrition_execute', {
+      description:'Five user intents only: meal (text estimate by default; source=measured for foodId-based weighed entry), correct (name or ID), health (checkin or typed observation), photo_stage (DRAFT preview only), photo_confirm (after explicit one-time user approval). Underlying engine still verifies provenance, versions and idempotency.',
+      inputSchema:{
+        memberId:z.string().optional().describe('Member attribution, not separate authentication'),
+        operation:z.enum(['meal','correct','health','photo_stage','photo_confirm']),
+        args:z.object({
+          mealSlot:z.string().optional(),source:z.enum(['text','measured']).optional(),
+          items:z.array(z.object({
+            name:z.string().optional(),foodId:z.string().optional(),
+            weightGrams:z.number().positive(),
+            p:z.number().min(0).optional(),c:z.number().min(0).optional(),
+            f:z.number().min(0).optional()
+          }).passthrough()).optional(),
+          requestId:z.string().optional(),date:z.string().optional(),
+          foodName:z.string().optional(),weightGrams:z.number().positive().optional(),
+          mealId:z.string().optional(),expectedRevision:z.number().int().min(0).optional(),
+          scaleWeightKg:z.number().positive().optional(),
+          sleepHours:z.number().min(0).max(24).optional(),
+          rhrBpm:z.number().positive().optional(),hrvMs:z.number().positive().optional(),
+          hrvMetric:z.enum(['SDNN','RMSSD']).optional(),
+          measuredAt:z.string().optional(),sourceEventId:z.string().optional(),
+          kind:z.string().optional(),systolic:z.number().optional(),
+          diastolic:z.number().optional(),value:z.number().optional(),note:z.string().optional()
+        }).passthrough().default({}).describe('For photo_stage/confirm, use the existing estimate_meal_photo MCP Prompt: estimate/matches or draftId/confirmed/confirmationEvidence/decisions; never commit without approval'),
+        includeContext:z.boolean().default(true).describe('Include short updated context after routine writes')
+      }
+    },compactCall(everyday.execute));
+  }
+  // v5.4 compatibility surface: two tools, but 12 read and 18 write variants.
+  if (surface==='compact') {
     mcp.registerTool('nutrition_query', {
       description:'Focused reads: household health/food context; foods (1–6 queries); barcode Open Food Facts packaging lookup; family_recipes saved household meal snapshots; report (7/30 days); meals/history; photo_draft; capabilities. External barcode values are candidates, NOT local food IDs.',
       inputSchema:{
@@ -308,8 +357,8 @@ function createMcpServer() {
   mcp.registerPrompt('nutrition_agent_workflow', {
     title:'Agent-first nutrition logging workflow',
     description:'Route text meals, photos, corrections and external food search into validated MCP operations.'
-  },async()=>({description:fullSurface?AGENT_WORKFLOW_VERSION:'nutrition.compact_workflow.v1',
-    messages:[{role:'user',content:{type:'text',text:fullSurface?AGENT_WORKFLOW:COMPACT_AGENT_WORKFLOW}}]}));
+  },async()=>({description:fullSurface?AGENT_WORKFLOW_VERSION:surface==='compact'?'nutrition.compact_workflow.v1':'nutrition.everyday_workflow.v1',
+    messages:[{role:'user',content:{type:'text',text:fullSurface?AGENT_WORKFLOW:surface==='compact'?COMPACT_AGENT_WORKFLOW:EVERYDAY_AGENT_WORKFLOW}}]}));
 
   // MCP prompt: external vision Agent sees the user's image; this server supplies
   // the compilation protocol and validates the resulting JSON via stage_photo_estimate.
