@@ -1,5 +1,11 @@
 # Agent-first MCP workflows (experimental)
 
+> **历史设计记录（v5.2 / 早期低层 API）——不要作为默认 Agent 调用规范。**
+> 当前 everyday 标准参见 [Agent 调用契约](AGENT_CONTRACT_ZH.md)。
+> 以下原有工具名称主要供显式 `MCP_TOOL_SURFACE=full` 的兼容、
+> 历史维护或设计回溯使用；正文原样保留其历史语境。
+
+
 This repository is an MCP nutrition-tool module. **The conversation with an AI Agent is the primary interface**; `viewport.html` is a read-only-first dashboard for monitoring and reviewing state. There is no embedded LLM. Tools are registered from the same `TOOL_DEFS` schema into the stdio MCP server.
 
 ## Normal agent session

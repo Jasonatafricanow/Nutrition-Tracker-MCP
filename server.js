@@ -17,7 +17,7 @@ import { z } from "zod";
 import { startRemoteMcp } from "./remote-mcp.js";
 import { createHousehold } from "./household.js";
 import { createAgentInterface } from "./agent-interface.js";
-import { createEverydayInterface } from "./everyday-interface.js";
+import { createEverydayInterface, EVERYDAY_READS, EVERYDAY_WRITES } from "./everyday-interface.js";
 import { COMPACT_AGENT_WORKFLOW } from "./compact-agent-workflow.js";
 import { EVERYDAY_AGENT_WORKFLOW } from "./everyday-agent-workflow.js";
 
@@ -209,7 +209,7 @@ function createMcpServer() {
     mcp.registerTool('nutrition_query', {
       description:'Everyday nutrition reads. summary = today or observed-data 7d/30d report; meals = a dated meal ledger for review/correction; foods = one batch of 1–6 LOCAL food names. For specialist tools use the opt-in compact/full profile.',
       inputSchema:{
-        view:z.enum(['summary','meals','foods']).default('summary'),
+        view:z.enum(EVERYDAY_READS).default('summary'),
         memberId:z.string().optional().describe('Member attribution in household mode, required for personal 7d/30d report'),
         period:z.enum(['today','7d','30d']).default('today').describe('Only summary uses 7d/30d; missing records stay unknown'),
         focus:z.enum(['daily','food','health']).default('daily').describe('Today summary category'),
@@ -222,7 +222,7 @@ function createMcpServer() {
       description:'Five user intents only: meal (text estimate by default; source=measured for foodId-based weighed entry), correct (name or ID), health (checkin or typed observation), photo_stage (DRAFT preview only), photo_confirm (after explicit one-time user approval). Underlying engine still verifies provenance, versions and idempotency.',
       inputSchema:{
         memberId:z.string().optional().describe('Member attribution, not separate authentication'),
-        operation:z.enum(['meal','correct','health','photo_stage','photo_confirm']),
+        operation:z.enum(EVERYDAY_WRITES),
         args:z.object({
           mealSlot:z.string().optional(),source:z.enum(['text','measured']).optional(),
           items:z.array(z.object({

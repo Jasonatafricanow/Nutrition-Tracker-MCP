@@ -1,5 +1,11 @@
 # Agent-first MCP runtime: integration notes (alpha.3)
 
+> **历史设计记录（v5.2 / 早期低层 API）——不要作为默认 Agent 调用规范。**
+> 当前 everyday 标准参见 [Agent 调用契约](AGENT_CONTRACT_ZH.md)。
+> 以下原有工具名称主要供显式 `MCP_TOOL_SURFACE=full` 的兼容、
+> 历史维护或设计回溯使用；正文原样保留其历史语境。
+
+
 **The agent host owns perception, intent and user-facing confirmation.** This module owns deterministic nutrition calculations, schema validation, SQLite writes and audit logs. The web dashboard is only an observer.
 
 ## Discovering the workflow
