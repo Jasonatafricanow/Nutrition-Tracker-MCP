@@ -67,7 +67,15 @@
 
 家庭最近睡眠/心率的展示与轻量关怀线索取最近实际有记录的一日，并附日期，避免昨天状态覆盖今天。
 
-## 两个工具的日常用法
+## v5.5 默认 everyday 操作（3 查 / 5 写）
+
+MCP 工具仍是 `nutrition_query` 和 `nutrition_execute`，但默认可选操作缩减为
+查询 `summary/meals/foods`，写入 `meal/correct/health/photo_stage/photo_confirm`。
+旧版 12 查询、18 写入接口通过 `MCP_TOOL_SURFACE=compact` 临时启用；
+完整底层工具用 `MCP_TOOL_SURFACE=full`。所有原有数据与审计机制保留，
+细节见 [功能收缩决策](EVERYDAY_AGENT_SURFACE_ZH.md)。
+
+## 两个工具的日常用法（v5.4 旧参数，需要 compact 兼容模式）
 
 - 普通用户默认一句话记餐：`nutrition_execute({memberId:'adult_a',operation:'quick_meal',args:{mealSlot:'午餐',source:'text',items:[{name:'米饭',weightGrams:150,foodId:'f7'}],requestId:'unique-meal-event'}})`，注明估算、可改。不必逐项确认估重。照片不能走 `quick_meal` 直写；识别预览后一轮确认，底层复用原有草稿与确认操作。
 - 家庭晚餐：`nutrition_query({view:'household',focus:'food'})` 一次读取成员健身营养目标及每日剩余额度，Agent 对同桌菜品建议个性化份量；普通模式成员不会被强加高低碳计划。

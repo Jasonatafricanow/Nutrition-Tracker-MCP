@@ -18,6 +18,7 @@ import { startRemoteMcp } from "./remote-mcp.js";
 import { createHousehold } from "./household.js";
 import { createAgentInterface } from "./agent-interface.js";
 import { COMPACT_AGENT_WORKFLOW } from "./compact-agent-workflow.js";
+import { EVERYDAY_AGENT_WORKFLOW } from "./everyday-agent-workflow.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEMO = process.argv.includes("--demo");
@@ -308,8 +309,8 @@ function createMcpServer() {
   mcp.registerPrompt('nutrition_agent_workflow', {
     title:'Agent-first nutrition logging workflow',
     description:'Route text meals, photos, corrections and external food search into validated MCP operations.'
-  },async()=>({description:fullSurface?AGENT_WORKFLOW_VERSION:'nutrition.compact_workflow.v1',
-    messages:[{role:'user',content:{type:'text',text:fullSurface?AGENT_WORKFLOW:COMPACT_AGENT_WORKFLOW}}]}));
+  },async()=>({description:fullSurface?AGENT_WORKFLOW_VERSION:surface==='compact'?'nutrition.compact_workflow.v1':'nutrition.everyday_workflow.v1',
+    messages:[{role:'user',content:{type:'text',text:fullSurface?AGENT_WORKFLOW:surface==='compact'?COMPACT_AGENT_WORKFLOW:EVERYDAY_AGENT_WORKFLOW}}]}));
 
   // MCP prompt: external vision Agent sees the user's image; this server supplies
   // the compilation protocol and validates the resulting JSON via stage_photo_estimate.
