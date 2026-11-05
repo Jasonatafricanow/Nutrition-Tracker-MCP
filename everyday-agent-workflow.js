@@ -19,7 +19,7 @@ export const EVERYDAY_AGENT_WORKFLOW = [
  'WRITE: nutrition_execute(operation="health",args={sleepHours?,scaleWeightKg?,rhrBpm?,...}) for user stated measures; kind-based household observations are supported but are not diagnoses.',
  '  Device batches continue through the authenticated health webhook, not through chat tool loops.',
  'No automatic TDEE recalibration, training-plan changes, supplement advice or whole-day completeness claims from a single recorded meal.',
- 'If the user explicitly requests professional nutrition editing, exports, barcode or recipe management, switch the deployment profile to MCP_TOOL_SURFACE=compact or full as appropriate; do not guess an unsupported hidden operation.',
+ 'For professional nutrition editing, exports, barcode or recipe management, explain that these are outside the everyday API. Do not guess hidden operations or change deployment settings yourself; an administrator may separately opt into the compatibility or professional surface.',
  'Household memberId is attribution within a trusted family deployment, NOT an access credential. Never leak unrelated member records.',
  'Short write responses already contain updated context; do not query again without a reason.'
 ].join('\n');

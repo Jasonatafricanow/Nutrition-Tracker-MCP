@@ -1,4 +1,4 @@
-# 家庭 NAS 轻量部署及 Agent 使用（v5.4）
+# 家庭 NAS 轻量部署及 Agent 使用（v5.5 everyday）
 
 这是一个**可信家庭内部**的 MCP 服务，不是多租户 SaaS。沿用原来的远程 MCP Token 作为 NAS 访问边界；配置中的 `memberId` 只是**记录属于谁**，不是登录账户。无成员密码、独立 Token、逐项共享申请。使用 Agent 进行日常操作，Dashboard 作为可选观察窗口，并支持点开对应成员今日膳食进行份量校准（沿用已有修订审计）。
 
@@ -29,20 +29,25 @@
 
    容器监听 `/mcp`（默认端口 3457，经已有 HTTPS/Tailscale 访问）；家庭数据库存在 `/data/household/`，保留个人 SQLite 存储计算。可以单独运行 `npm start` 与 `HOUSEHOLD_CONFIG`/`HOUSEHOLD_DATA_DIR` 配置进行本地检查。
 
-5. Agent 连接同一个 URL 和 NAS Bearer Token，使用两个默认工具：`nutrition_query` 与 `nutrition_execute`。**已有使用老工具名的 Agent** 可以暂时将 `MCP_TOOL_SURFACE=full` 开启兼容模式；完成 Agent 提示词迁移后改回默认 compact。
+5. Agent 连接同一个 URL 和 NAS Bearer Token，默认仅使用 `nutrition_query` 与 `nutrition_execute`，遵守 [Agent 调用契约](AGENT_CONTRACT_ZH.md)。原 v5.4 的两工具操作集合使用 `MCP_TOOL_SURFACE=compact` 迁移兼容，原始底层工具使用 `MCP_TOOL_SURFACE=full`。新安装保持默认 `everyday` 即可。
 
-## 交互深度
+## 家庭日常调用边界
 
-默认保留可见的专业健康／营养能力，Dashboard 可切换「日常视图」，不删除任何记录，随时恢复专业视图。这是浏览器端展示偏好，不会自动修改成员模式、TDEE 或历史记录。
+Dashboard 保留专业营养与日常视图切换，但**界面展示模式不改变 MCP 的工具发现**。
+日常 Agent 默认只读三类（`summary/meals/foods`）与写五类
+（`meal/correct/health/photo_stage/photo_confirm`）；具体例子、精度、
+纠错与照片审批约束统一见 [Agent 调用契约](AGENT_CONTRACT_ZH.md)。
 
-普通文字记餐可使用 `quick_meal` 直接记录估算值；**照片必须先向用户展示识别种类与大致份量并得到一次整体确认**，再以原有 `photo_stage` / `photo_confirm` 写入。不要为照片中每种食物分别追问。
+- 文字记餐：`nutrition_execute({operation:"meal",memberId:"adult_a",args:{mealSlot:"午餐",source:"text",items:[...],requestId:"..."}})`。估算有来源标识，不能把图片当文字提交。
+- 家庭饮食概况：`nutrition_query({view:"summary",period:"today",focus:"food"})`；专业训练成员的宏量目标不会强加给普通成员。
+- 最近健康概况：`nutrition_query({view:"summary",period:"today",focus:"health"})`；不构成诊断，不将缺失读数当零。
+- 个人健康记录：`nutrition_execute({operation:"health",memberId:"adult_a",args:{sleepHours:6.5,rhrBpm:60}})`。
+- 修改记录：`nutrition_execute({operation:"correct",memberId:"adult_a",args:{foodName:"米饭",weightGrams:100,requestId:"..."}})`；不唯一则询问、绝不猜测。
+- 照片：`estimate_meal_photo` Prompt → `photo_stage` 未确认草稿 → 用户整体确认 → `photo_confirm` 正式入账。
 
-## 追加的低摩擦能力
-
-- `recent_correction`：用户只需说「刚才米饭是 220 克」，Agent 直接按食物名定位最近一次记录并审计修改。同一天同名出现多次时返回歧义，请用户补充餐次；不猜测修改目标。
-- `family_recipes`：汇总各成员已保存的餐食模板，用于家庭共餐建议与不同份量，不新建库存和权限管理。
-- `barcode`：8–14 位商品条码查询 Open Food Facts，返回带外部来源标记的包装营养值；不是本地已校验食物，不自动入账。
-- `report`：7 或 30 天简短饮食/睡眠/心率/活动趋势报告，未记录的日期不能当作零摄入。
+餐食模板、条码、USDA、补剂与专业训练计划属于显式启用的扩展/迁移接口，
+不在家庭日常 Agent 的默认选项内。切换 `MCP_TOOL_SURFACE` 是**部署者**
+决定的服务设置，不是 Agent 每次谈话自行选择的工具。
 
 ## 设备批量导入（沿用原有私有 Webhook）
 
@@ -57,7 +62,7 @@
 
 最多 30 条，同一请求只属于一个家庭成员。每条记录必须包含稳定 `sourceEventId` 和带时区的 `measuredAt`；重复导入不会重复记录。部分失败返回 HTTP 207 及逐项错误，手机自动化需要检查结果并重试失败项。此接口没有自动拉取手环云端数据的能力；手机端仍需要快捷指令/Health Auto Export 等主动发送。
 
-默认两工具不变；`nutrition_execute.args` 对常用餐食、更正和打卡提供可发现的类型字段，复杂/低频操作继续由原引擎校验。
+手机健康数据同步与 Agent 工具是不同入口：此 Webhook 的鉴权、幂等及事件归属不因 MCP 默认操作收缩而改变。
 
 ## 同步时必须保留事件身份
 
@@ -67,33 +72,16 @@
 
 家庭最近睡眠/心率的展示与轻量关怀线索取最近实际有记录的一日，并附日期，避免昨天状态覆盖今天。
 
-## v5.5 默认 everyday 操作（3 查 / 5 写）
+## 当前协议与兼容
 
-MCP 工具仍是 `nutrition_query` 和 `nutrition_execute`，但默认可选操作缩减为
-查询 `summary/meals/foods`，写入 `meal/correct/health/photo_stage/photo_confirm`。
-旧版 12 查询、18 写入接口通过 `MCP_TOOL_SURFACE=compact` 临时启用；
-完整底层工具用 `MCP_TOOL_SURFACE=full`。所有原有数据与审计机制保留，
-细节见 [功能收缩决策](EVERYDAY_AGENT_SURFACE_ZH.md)。
+单一有效规范：[Agent 调用契约](AGENT_CONTRACT_ZH.md)。
+`MCP_TOOL_SURFACE=everyday`（默认）暴露 3 查 + 5 写；
+`compact` 保留早期 12 查 + 18 写；`full` 为底层工具兼容。
+家庭 NAS 数据、成员 ID、审计与设备同步不做自动迁移或清理。
 
-## 两个工具的日常用法（v5.4 旧参数，需要 compact 兼容模式）
-
-- 普通用户默认一句话记餐：`nutrition_execute({memberId:'adult_a',operation:'quick_meal',args:{mealSlot:'午餐',source:'text',items:[{name:'米饭',weightGrams:150,foodId:'f7'}],requestId:'unique-meal-event'}})`，注明估算、可改。不必逐项确认估重。照片不能走 `quick_meal` 直写；识别预览后一轮确认，底层复用原有草稿与确认操作。
-- 家庭晚餐：`nutrition_query({view:'household',focus:'food'})` 一次读取成员健身营养目标及每日剩余额度，Agent 对同桌菜品建议个性化份量；普通模式成员不会被强加高低碳计划。
-- 健康观察：`nutrition_query({view:'household',focus:'health'})` 一次读取最近已记录的睡眠、HRV、静息心率、活动、体重、血压、体温、血糖、少量值得注意的变化。不是临床诊断。不需要全量历史。
-- 个人记录：`nutrition_execute({memberId:'adult_a',operation:'checkin',args:{sleepHours:6.5,rhrBpm:60}})`，返回简短最新状态，通常不需再次请求工具。
-- 一餐多种食材：`nutrition_query({view:'foods',memberId:'adult_a',queries:['熟米饭','鸡胸肉']})`，一次返回食材 ID；然后 `nutrition_execute({memberId:'adult_a',operation:'meal',args:{mealSlot:'午餐',items:[{foodId:'f7',weightGrams:150}],requestId:'unique-meal-id'}})`。实际添加每个食材前核实其 ID、加工状态和份量。
-- 补充健康观察：`nutrition_execute({memberId:'adult_b',operation:'health_observation',args:{kind:'blood_pressure',systolic:120,diastolic:80}})`；历史详情按需 `nutrition_query({view:'health_history',memberId:'adult_b'})`。
-- 纠正份量：先 `nutrition_query({view:'meals',memberId:'adult_a'})` 获取 ID 和版本，后 `nutrition_execute({memberId:'adult_a',operation:'correction',args:{mealId:'...',expectedRevision:0,weightGrams:100,requestId:'unique-correction-id'}})`。
-- 照片：在需要时读取 `estimate_meal_photo` MCP Prompt；视觉 Agent 生成编译产物，`nutrition_query({view:'foods',...})` 匹配库，`nutrition_execute(operation:'photo_stage',...)` 建立草稿。**用户确认后**才 `photo_confirm` 入账，避免照片直接凭空计算热量。
-- 高级功能（补剂、训练计划、TDEE 等）：按需 `nutrition_query({view:'capabilities',domain:'planning'|'extras'|'history'})`，复用底层确定性引擎和对应 `nutrition_execute` 操作；默认不把几十个接口都暴露给 LLM。
-
-## Token 与调用优化的边界
-
-- 默认 MCP 工具只有 **2 个**。仓库自动测试会比较完整/紧凑的实际工具定义 JSON 大小；这只能证明工具目录体积降低，**不能代表真实模型 Token 消耗与工具选择准确率已经验证**。
-- 家庭摘要不返回原始历史和症状全文；需要详细数据才单独查询。
-- 食物匹配至少需要先核实食物 ID，无法保证任何场景都是单次调用；多项食材可合并成一次查询。
-- 常见写入直接在返回结果附上最新紧凑状态，避免写入后马上再读全量状态。
-- 原有营养引擎、照片编译、安全校验、幂等性和 TDEE 预览保护不变。
+历史 v5.4 的 `quick_meal`、`recent_correction`、`view:"household"`
+不应再写入新 Agent 提示词；它们只能在兼容模式中使用。
+默认写入成功时返回简短更新状态，不需机械追加一次全量读取。
 
 ## 回滚说明与数据
 

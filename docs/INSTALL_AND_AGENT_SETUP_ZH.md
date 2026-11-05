@@ -1,11 +1,18 @@
 # Nutrition Tracker MCP — 安装、部署与 Agent 连接指南
 
-> 当前说明适用于已经合并 Agent-first、照片编译和远程 MCP 能力的 GitHub **`main` 分支**。本项目是 **Agent-first MCP 工具服务**：聊天中的 Agent 执行识别、查询、确认和工具调用；`engine.js` 负责确定性计算与 SQLite 持久化；Dashboard 只用于监控与回顾。
+> **当前标准：v5.5 everyday**。默认只暴露两个 MCP 工具
+> `nutrition_query`（`summary/meals/foods`）和 `nutrition_execute`
+> （`meal/correct/health/photo_stage/photo_confirm`）。
+> 具体参数与业务约束只参考 [Agent 调用契约](AGENT_CONTRACT_ZH.md)。
+> `MCP_TOOL_SURFACE=compact` 是 v5.4 两工具旧参数的迁移接口，
+> `MCP_TOOL_SURFACE=full` 是早期低层工具兼容/专业维护模式。
+> 下文配置均默认 `everyday`，无需额外设置环境变量。
+
 
 ## 1. 前置条件与下载
 
 - **Node.js >= 22.13**（项目使用内置 `node:sqlite`）、npm、Git。
-- 主机必须能运行本地进程；当前 **MCP 传输为 stdio**，不是 HTTP MCP。
+- 主机必须能运行本地进程；支持本地 **stdio MCP**，也支持可选的经 Bearer Token 鉴权的 **Streamable HTTP MCP**（默认关闭；见远程部署指南）。
 - MCP 模块自身不需要 AI API Key；视觉识别由支持图片的外部 Agent/模型完成，该宿主可能需要自己的账号或 API。USDA 查询是可选联网功能。
 
 PowerShell / macOS / Linux 终端：
@@ -114,7 +121,7 @@ macOS：`~/Library/Application Support/Claude/claude_desktop_config.json`。
 }
 ```
 
-保存、重启或刷新 Cursor MCP 配置，在 MCP 工具列表确认 `get_agent_context`、`search_foods` 等工具已加载。Cursor CLI 可使用 `agent mcp list` / `agent mcp list-tools nutrition-tracker-mcp` 查看状态。
+保存、重启或刷新 Cursor MCP 配置，在 MCP 工具列表确认 **仅有 `nutrition_query` 和 `nutrition_execute`**。Cursor CLI 可使用 `agent mcp list` 查看状态（具体命令依宿主版本而异）。
 
 ### Claude Code CLI
 
@@ -157,37 +164,43 @@ env = { NUTRITION_TIME_ZONE = "Asia/Shanghai" }
 | Command | Node.js 可执行文件路径或 `node` |
 | Arguments | `server.js` 的绝对路径 |
 
-如果宿主只支持云端 HTTP MCP URL，当前版本**不能**直接填 `http://127.0.0.1:3456`；那个端口提供的是 Dashboard、应用 JSON API 与应用 SSE，**不是 MCP HTTP 传输协议**。如要部署到 NAS / 服务器并让另一台机器上的 Agent 远程连接，需要额外开发受认证的 Streamable HTTP MCP 层或专门的安全桥接方案，不应直接公网暴露 Dashboard API。
+如果宿主只支持远程 HTTP MCP，可以按 [远程部署说明](REMOTE_MCP_DEPLOYMENT_ZH.md) 配置经 Bearer Token 鉴权的 **Streamable HTTP MCP**（`/mcp`，默认独立端口 3457，默认关闭）。`http://127.0.0.1:3456` 是 Dashboard，不是远程 MCP；不要把 Dashboard API 直接开放公网。
 
-## 4. 检查 Agent 是否真正可以使用工具
+## 4. 验证默认协议已连接
 
-连接后先让 Agent：
+确认 MCP 工具清单恰好出现 `nutrition_query` 与 `nutrition_execute`，不会默认出现 `get_agent_context`、`search_foods` 等底层工具。
 
-> 读取 Nutrition Tracker 的 Agent 工作流和今天的营养上下文。不要修改任何数据，告诉我今天的目标和已记录内容。
+让 Agent 读取（不写入）：
 
-Agent 应调用 `get_agent_workflow`（或加载 MCP Prompt `nutrition_agent_workflow`），随后调用 `get_agent_context`。确认工具实际返回数据，才算完成联通。
+> 用 Nutrition Tracker 查询今天的营养与健康记录，不要修改任何数据。
 
-本模块还暴露 `estimate_meal_photo` MCP Prompt。**Prompt 注册不代表宿主会自动执行**。如果宿主不能自动调用 MCP Prompt，请给宿主规则加入：
+应路由到：
 
-> When a user asks to record or correct food, first follow the Nutrition Tracker MCP `nutrition_agent_workflow` prompt (fallback: call `get_agent_workflow`). For photo meals, use `estimate_meal_photo` (fallback: `get_photo_estimation_protocol`), then stage estimates and obtain explicit user confirmation before calling `confirm_photo_meal`. Never invent food weights, raw/cooked states, or nutrition values.
+~~~js
+nutrition_query({view:"summary",period:"today"})
+~~~
 
-## 5. 日常使用实例
+家庭模式请带上对应成员 `memberId`；需要全家庭概况时可以不带。支持 MCP Prompt 的宿主可按需加载 `nutrition_agent_workflow`；不支持 Prompt 的宿主直接按 [标准契约](AGENT_CONTRACT_ZH.md) 配置行为规范，**不需要**调用 `get_agent_workflow`（它是历史 full profile 工具）。
 
-| 用户对 Agent 说 | Agent 预期工具动作 |
+## 5. 日常任务示例
+
+| 用户意图 | 当前 everyday 调用 |
 | --- | --- |
-| “中午吃了熟米饭 150g 和鸡胸肉 200g，记一下。” | `search_foods` → 核实重量口径 → `log_meal_items` → `get_meal_history` |
-| “把刚才的午餐存成我的工作餐。” | `save_meal_template` |
-| “和上次工作餐一样。” | `list_meal_templates` → 核实实际份量 → `log_meal_template` |
-| “刚才米饭我只吃了一半。” | `get_meal_history` → `update_meal_item`（版本检查） → 核对 |
-| “这是今天午饭，帮我记。”并附照片 | 视觉 Agent → `estimate_meal_photo` → `search_foods` → `stage_photo_estimate` → 用户确认 → `confirm_photo_meal` |
-| “看看今天还剩多少热量。” | `get_agent_context` |
-| “把这个月的记录导出来。” | `export_nutrition_data`（单次最长 90 天） |
+| “今天还剩多少热量？” | `nutrition_query({view:"summary",period:"today",focus:"food"})` |
+| “查询今天的餐食。” | `nutrition_query({view:"meals"})` |
+| “午餐米饭和鸡胸肉 150g，记一下。” | 必要时 `view:"foods"` 核验真实食材 ID，然后 `nutrition_execute({operation:"meal",args:{mealSlot:"午餐",source:"text",requestId,...}})` |
+| “刚才米饭其实只吃了 100g。” | `nutrition_execute({operation:"correct",args:{foodName:"米饭",weightGrams:100,requestId}})`；不唯一则先查 `meals` |
+| “昨晚只睡了六小时。” | `nutrition_execute({operation:"health",args:{sleepHours:6}})` |
+| “这是午饭照片，帮我记。” | 视觉 Agent 按 `estimate_meal_photo` 解析，`photo_stage` 暂存并预览，用户一次确认后 `photo_confirm` |
+| “看看近 30 天趋势。” | `nutrition_query({view:"summary",period:"30d"})` |
 
-**照片记录必须分两步。** Agent 给出识别候选、份量区间以及油/酱汁等未知项；用户明确核对后才可以入账。未确定时，Agent 可以保存未确认草稿或询问，不应伪造准确克数。
+专业模板、USDA、补剂、训练计划、导出等不属于默认日常入口。如果确有专业需求，由部署者**显式**选择 `MCP_TOOL_SURFACE=compact` 或 `full`；不要让日常 Agent 继续猜测旧底层工具名。
+
+照片不可直接走文字入账；`photo_stage` 不写账本，用户确认后才能 `photo_confirm`。
 
 ## 6. 可选：USDA 食材数据库与健康 Webhook
 
-默认食材库可离线使用。需要 USDA FoodData Central 检索时，在 **MCP 宿主进程环境**添加 `FDC_API_KEY`。不要把密钥提交 GitHub，也不要要求 Agent 在对话中重复展示。工具 `search_usda_foods` / `get_usda_food_details` 只读，不会自动把外部候选写入本地食材库。
+默认 everyday 仅查询本地食材库，离线可用。USDA FoodData Central 搜索属于**可选专业模式**：在 MCP 宿主进程配置 `FDC_API_KEY` 并显式启用 `full`，可使用旧只读工具 `search_usda_foods` / `get_usda_food_details`；这些外部候选不会自动变为本地食材 ID。密钥不要提交 GitHub 或放入对话。
 
 `HEALTH_WEBHOOK_TOKEN` 仅用于独立的手机健康数据 HTTP Webhook；**本地 stdio MCP 连接本身不需要这个令牌**。不使用手机同步时可以不配置。
 
@@ -195,21 +208,21 @@ Agent 应调用 `get_agent_workflow`（或加载 MCP Prompt `nutrition_agent_wor
 
 | 症状 | 优先检查 |
 | --- | --- |
-| Agent 看不到工具 | 是否真的切到实验分支；MCP 配置文件位置与 JSON/TOML 格式；客户端是否重启；`node` 与 `server.js` 绝对路径 |
-| `spawn node ENOENT` | 在 Agent 宿主环境中使用 Node.js 可执行文件的绝对路径 |
-| 连接后工具能列出却不调用 | 宿主工具权限、MCP Prompt 自动加载机制；明确请求 `get_agent_workflow` |
-| 图片无法识别 | Agent 宿主必须支持视觉并能够把用户照片放入模型上下文；MCP 自身不读取图片像素 |
-| 食材搜索没有结果 | 先用本地 `search_foods`；USDA 工具需要 `FDC_API_KEY` 和网络访问 |
-| 误以为没有保存 | 检查 `get_meal_history`、日期和 `NUTRITION_TIME_ZONE`；照片草稿并不等于已入账 |
-| MCP 连接占用端口 | 多客户端可能各启动一个进程；HTTP 端口只供首个实例监听，SQLite 同库同步独立进行 |
-| 裸命令启动后没有 MCP 会话 | MCP stdio 需要客户端控制 stdin/stdout；手动 `npm start` 只是启动本地 HTTP 观察窗 |
+| 看不到工具 | MCP 配置文件、客户端重启、`node` 和 `server.js` 绝对路径 |
+| 出现 `get_agent_context` 等几十个工具 | 意外启用了 `MCP_TOOL_SURFACE=full`；日常应为 `everyday` |
+| 只有两个工具却不支持 `summary` | 正运行 v5.4 `compact` 接口或旧服务进程，先检查环境变量/版本 |
+| `spawn node ENOENT` | 使用 Node 可执行文件绝对路径 |
+| 工具存在但不被调用 | 宿主 MCP 工具权限，按需加载 Prompt 或提供 [当前契约](AGENT_CONTRACT_ZH.md) |
+| 无法识别照片 | 宿主需要具备视觉能力；MCP 不会自行查看图片 |
+| 餐食未入账 | 通过 `nutrition_query({view:"meals"})` 查账；照片暂存不等于确认 |
+| 远程连接失败 | 独立 `/mcp` 监听、Token、Host/Origin、TLS，见远程部署指南 |
 
 查看官方宿主配置帮助： [Claude Code MCP](https://code.claude.com/docs/en/mcp) · [Cursor MCP](https://prod.cursor.com/docs/mcp) · [Claude Desktop local MCP](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop) · [Codex MCP](https://developers.openai.com/codex/mcp)。
 
 ## 8. 数据和安全提醒
 
 - 数据库默认 `macro_engine.db`，含个人饮食、体重等健康记录；请备份，勿提交公开代码仓库。
-- 目前是个人本地使用的实验版，不提供独立多用户账号权限；不要设置 `HOST=0.0.0.0` 暴露到公网。
+- 家庭 NAS 采用共享实例的信任边界，不提供成员独立授权；不要将 Dashboard 端口暴露公网，远程 MCP 需使用独立受认证入口。
 - `npm run demo` 使用单独演示数据；切勿把演示库当作正式账本。
 - 同一条确认记账的 `requestId` 在重试时保持不变，不同餐食使用不同 ID。
 - TDEE 校准默认预览、不自动应用；历史体重模型和照片重量估算尚未在真实人体/称重图片上验证。
