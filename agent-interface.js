@@ -25,7 +25,7 @@ const clean = v=>Object.fromEntries(Object.entries(v).filter(([,x])=>x!==null&&x
 export function createAgentInterface({engine,household=null,usda=null,openFoodFacts=null}={}){
  if(!engine)throw Error('engine required');
  const forMember=(id)=>{
-   if(household){if(!id)throw Error('memberId required for personal operations in household mode');
+   if(household){id??=household.primary;if(!id)throw Error('memberId required for personal operations in household mode');
      household.member(id);return (name,args)=>household.memberTool(id,name,args);
    }
    if(id)throw Error('memberId requires household mode');
@@ -132,6 +132,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
    throw Error('unknown query view');
  }
  function execute({memberId,operation,args={},tool,includeContext=true}={}){
+   memberId??=household?.primary??undefined; // personal writes without memberId belong to the primary member
    const afterWrite=(out)=>{
      if(!includeContext||!['meal','quick_meal','checkin','health_observation','correction','recent_correction','plan_log'].includes(operation))return out;
      if(household){const r=household.context({days:3,memberId});

@@ -33,11 +33,18 @@ export function validateHouseholdConfig(config){
   });
 }
 
-export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()}={}){
+// `primary` (optional) names the member whose ledger IS the existing single-person database:
+// that member reuses the main engine, so the Dashboard, legacy callers and the family view
+// share one copy of their data and nothing has to be migrated.
+export function createHousehold({configPath,dir,engineFactory,primaryEngine=null,now=()=>new Date()}={}){
   if(!path.isAbsolute(configPath??'')||!path.isAbsolute(dir??''))throw Error('household paths must be absolute');
   if(typeof engineFactory!=='function')throw Error('engineFactory required');
-  const members=validateHouseholdConfig(JSON.parse(readFileSync(configPath,'utf8')));
+  const config=JSON.parse(readFileSync(configPath,'utf8'));
+  const members=validateHouseholdConfig(config);
   const byId=new Map(members.map(m=>[m.id,m]));
+  const primary=config.primary??null;
+  if(primary!==null&&!byId.has(primary))throw Error('household primary must be a listed member');
+  if(primary!==null&&!primaryEngine)throw Error('household primary requires the main engine');
   mkdirSync(dir,{recursive:true,mode:0o700});
   const database=new DatabaseSync(path.join(dir,'household-health.db'));
   database.exec(`PRAGMA journal_mode=WAL;
@@ -51,16 +58,16 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
       member_id TEXT NOT NULL, signal TEXT NOT NULL, last_date TEXT NOT NULL,
       PRIMARY KEY(member_id, signal)
     );`);
-  const engines=new Map();
+  const engines=new Map(primary?[[primary,primaryEngine]]:[]);
   const member=id=>{const m=byId.get(id);if(!m)throw Error('unknown memberId');return m;};
   const memberEngine=id=>{
     const m=member(id);
     if(!engines.has(id))engines.set(id,engineFactory(path.join(dir,`nutrition-${id}.db`),{timeZone:m.timeZone,now}));
     return engines.get(id);
   };
-  const memberTool=(memberId,tool,args={})=>{
+  const memberTool=(memberId,tool,args={},source=`HOUSEHOLD:${memberId}`)=>{
     if(typeof tool!=='string'||tool==='get_household_context')throw Error('invalid nutrition tool');
-    return memberEngine(memberId).execute(tool,args,`HOUSEHOLD:${memberId}`);
+    return memberEngine(memberId).execute(tool,args,source);
   };
   const logObservation = ({memberId,kind,observedAt,note,sourceEventId,systolic,diastolic,value})=>{
     const m=member(memberId);
@@ -142,6 +149,6 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
     database.prepare('INSERT INTO mentions VALUES(?,?,?) ON CONFLICT(member_id,signal) DO UPDATE SET last_date=excluded.last_date').run(memberId,signal,day);
     return {ok:true,memberId,signal,lastMentioned:day};
   };
-  return {members,member,memberTool,logObservation,observations,context,acknowledge,
-    close(){for(const e of engines.values())e.close();database.close();}};
+  return {members,primary,member,memberTool,logObservation,observations,context,acknowledge,
+    close(){for(const [id,e] of engines)if(id!==primary)e.close();database.close();}};
 }

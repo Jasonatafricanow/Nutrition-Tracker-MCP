@@ -34,7 +34,8 @@ const engine = createEngine(DB_PATH, { demo: DEMO });
 const household = process.env.HOUSEHOLD_CONFIG ? createHousehold({
   configPath: path.resolve(process.env.HOUSEHOLD_CONFIG),
   dir: path.resolve(process.env.HOUSEHOLD_DATA_DIR || path.join(__dirname, "household-data")),
-  engineFactory: createEngine
+  engineFactory: createEngine,
+  primaryEngine: engine
 }) : null;
 const usda = createUSDAClient();
 const openFoodFacts = createOpenFoodFactsClient();
@@ -143,13 +144,16 @@ function parseHealthReading(b) {
 app.post("/api/health-webhook", authorizeWebhook, (req,res)=>{
   const b=req.body||{};
   try{
-    if(household && !b.memberId)return res.status(400).json({ok:false,error:"memberId required in household mode"});
+    const memberId=b.memberId??household?.primary??undefined; // no memberId = the primary member
+    if(household && !memberId)return res.status(400).json({ok:false,error:"memberId required in household mode"});
     if(!household && b.memberId)return res.status(400).json({ok:false,error:"memberId requires household mode"});
-    if(household)household.member(b.memberId); // reject invalid member before processing a batch
+    if(household)household.member(memberId); // reject invalid member before processing a batch
+    // Keep the webhook source on every path: the sleep gate and per-source dedup key on it.
+    const source=b.source?`HEALTH_WEBHOOK:${b.source}`:"HEALTH_WEBHOOK";
     const write=(reading)=>{
       const args=parseHealthReading(reading);
-      return household?household.memberTool(b.memberId,"log_morning_checkin",args):
-        run("log_morning_checkin",args,b.source?`HEALTH_WEBHOOK:${b.source}`:"HEALTH_WEBHOOK");
+      return household&&memberId!==household.primary?household.memberTool(memberId,"log_morning_checkin",args,source):
+        run("log_morning_checkin",args,source);
     };
     if(!Object.hasOwn(b,'events'))return res.json({ok:true,...write(b)}); // legacy single payload
     if(!Array.isArray(b.events)||b.events.length<1||b.events.length>30)
@@ -166,7 +170,7 @@ app.post("/api/health-webhook", authorizeWebhook, (req,res)=>{
     });
     const succeeded=results.filter(x=>x.ok),failed=results.length-succeeded.length;
     return res.status(failed?207:200).json({ok:failed===0,partial:failed>0,
-      succeeded:succeeded.length,failed,memberId:b.memberId??null,results});
+      succeeded:succeeded.length,failed,memberId:memberId??null,results});
   }catch(e){return res.status(400).json({ok:false,error:e.message});}
 });
 
