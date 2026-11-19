@@ -210,6 +210,12 @@
     .household-card .mini { display:flex; flex-wrap:wrap; gap:7px 12px; font-size:12px; line-height:1.7; }
     .household-card .mini span { color:var(--muted); }
     .household-card p { font-size:12px; margin:10px 0 0; }
+    .stock-cards { margin-top:12px; }
+    .stock-list { font-size:12px; line-height:1.7; }
+    .stock-list > div:not(.sub), .stock-list .sub > div { display:flex; justify-content:space-between; gap:10px; }
+    .stock-list > div:not(.sub) > span:last-child, .stock-list .sub > div > span:last-child { white-space:nowrap; }
+    .stock-list .exp { color:var(--accent); } .stock-list .soon { color:var(--lv-high); }
+    .stock-list .sub { margin-top:8px; padding-top:6px; border-top:1px solid var(--rule); }
     /* 首屏错落渐入 */
     .reveal { animation: rise .6s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--i, 0) * 60ms); }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
@@ -239,6 +245,7 @@
     <section id="household-panel" class="reveal hidden" style="margin:20px 0 28px">
       <div class="sec-head"><h2>家庭概览</h2><span class="aside">数据来自家庭 NAS · 仅供观察</span></div>
       <div id="household-cards" class="household-cards"></div>
+      <div id="stock-cards" class="household-cards stock-cards"></div>
     </section>
 
     <!-- 今日 -->
@@ -789,6 +796,43 @@
         <div class="mini">${fields.map(([a,b])=>`<div><span>${esc(a)}</span> ${esc(b)}</div>`).join('')}</div>
         <div class="small" style="margin-top:10px"><span class="muted">近 7 天吃了什么</span>${log}</div></article>`;
     }
+    // Fridge, medicine cabinet and workouts: shared household stock, read-only here.
+    const clock=iso=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso)).replace('/','-');
+    const card=(title,body)=>`<article class="household-card"><h3>${title}</h3><div class="stock-list">${body}</div></article>`;
+    const none='<span class="muted">还没有记录</span>';
+    function pantryCard(p){
+      const rows=(p?.items||[]).map(i=>{
+        const cls=i.daysLeft<0?'exp':i.daysLeft<=2?'soon':'';
+        const left=i.daysLeft<0?`过期 ${-i.daysLeft} 天`:i.daysLeft===0?'今天到期':`还剩 ${i.daysLeft} 天`;
+        return `<div class="${cls}"><span>${esc(i.name)}${i.quantity?` <span class="muted">${esc(i.quantity)}</span>`:''}</span><span>${left}</span></div>`;
+      });
+      return card('冰箱',rows.join('')||none);
+    }
+    function medsCard(m,names){
+      const who=ids=>ids?.length?ids.map(id=>names[id]||id).join('、'):'全家';
+      const cab=(m?.cabinet||[]).map(x=>`<div><span>${esc(x.name)} <span class="muted">${esc(who(x.forMembers))}</span></span><span>${esc([x.dose,x.minIntervalHours?`隔 ${x.minIntervalHours} 小时`:''].filter(Boolean).join(' · '))}</span></div>`);
+      const rec=(m?.recent||[]).map(r=>{
+        const capped=r.canTakeNow===false&&(r.note||'').includes('上限');
+        const st=capped?'<span class="exp">24 小时已到上限</span>':r.canTakeNow?'现在能吃':r.canTakeNow===false?
+          `<span class="soon">还要等 ${Math.floor(r.waitMinutes/60)} 小时 ${r.waitMinutes%60} 分</span>`:'<span class="muted">没登记间隔</span>';
+        return `<div><span>${esc(names[r.memberId]||r.memberId)} · ${esc(r.medication)} <span class="muted">${clock(r.lastTakenAt)}</span></span><span>${st}</span></div>`;
+      });
+      if(!cab.length&&!rec.length)return card('药箱',none);
+      return card('药箱',(cab.join('')||none)+(rec.length?`<div class="sub">${rec.join('')}</div>`:''));
+    }
+    function workoutsCard(w,names){
+      const ms=w?.members||[];
+      const sum=ms.map(m=>`<div><span>${esc(names[m.memberId]||m.memberId)}</span><span>这周 ${m.sessionsThisWeek} 次 · ${m.minutesThisWeek} 分钟</span></div>`);
+      const recent=ms.flatMap(m=>m.recent.map(r=>({...r,memberId:m.memberId}))).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5)
+        .map(r=>`<div class="muted"><span>${esc(md(r.date))} ${esc(names[r.memberId]||r.memberId)} ${esc(r.activity)}</span><span>${r.durationMin?r.durationMin+' 分钟':''}</span></div>`);
+      return card('运动',sum.length?sum.join('')+`<div class="sub">${recent.join('')}</div>`:none);
+    }
+    async function refreshStock(members){
+      const get=v=>fetch('/api/household?view='+v).then(r=>r.ok?r.json():null).catch(()=>null);
+      const [p,m,w]=await Promise.all([get('pantry'),get('meds'),get('workouts')]);
+      const names=Object.fromEntries((members||[]).map(x=>[x.memberId,x.name]));
+      $('stock-cards').innerHTML=pantryCard(p)+medsCard(m,names)+workoutsCard(w,names);
+    }
     async function refreshHousehold() {
       try {
         const res=await fetch('/api/household');
@@ -814,6 +858,7 @@
               <div id="household-meals-${esc(m.memberId)}" class="small muted">点击加载</div>
             </details></article>`;
         }).join('');
+        await refreshStock(data.members);
       } catch {} // A secondary panel should never break personal nutrition UI
     }
     refreshHousehold();

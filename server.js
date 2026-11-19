@@ -104,6 +104,10 @@ app.get("/api/household", (req,res)=> {
       if(typeof req.query.memberId!=='string')return res.status(400).json({error:"memberId required"});
       return res.json(household.memberTool(req.query.memberId,"get_meal_history",{}));
     }
+    // Read-only household stock for the dashboard: fridge, medicine cabinet, workouts.
+    if(req.query.view==='pantry')return res.json(household.stock.pantry());
+    if(req.query.view==='meds')return res.json(household.stock.meds());
+    if(req.query.view==='workouts')return res.json(household.stock.workouts({days:7}));
     res.json(household.context());
   } catch(e){res.status(400).json({error:e.message});}
 });
