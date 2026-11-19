@@ -73,13 +73,16 @@ test('one correction intent resolves recent name or versioned ID; ambiguous path
    items:[{name:'米饭',weightGrams:150,foodId:'f7'}]});
   const fix=exec(f.api,'correct',{foodName:'米饭',weightGrams:200,requestId:'correct-name'});
   assert.equal(fix.after.weightGrams,200);
-  assert.throws(()=>exec(f.api,'correct',{mealId:r.mealIds[0],weightGrams:220,
-   requestId:'no-version'}),/expectedRevision/);
-  const older=exec(f.api,'correct',{mealId:r.mealIds[0],expectedRevision:1,
+  // No revision given → the current one (11-20: Xiyue is the only routine writer).
+  const latest=exec(f.api,'correct',{mealId:r.mealIds[0],weightGrams:210,requestId:'no-version'});
+  assert.equal(latest.after.revision,2);
+  assert.throws(()=>exec(f.api,'correct',{mealId:r.mealIds[0],expectedRevision:1,
+   weightGrams:220,requestId:'stale'}),/版本/);                 // a stated stale revision still fails
+  const older=exec(f.api,'correct',{mealId:r.mealIds[0],expectedRevision:2,
    weightGrams:220,requestId:'correct-id'});
-  assert.equal(older.after.revision,2);
+  assert.equal(older.after.revision,3);
   const audit=f.family.memberTool('b','get_meal_corrections',{mealId:r.mealIds[0]});
-  assert.equal(audit.corrections.length,2);
+  assert.equal(audit.corrections.length,3);
   assert.throws(()=>exec(f.api,'correct',{weightGrams:100,requestId:'empty'}),/requires mealId/);
  }finally{f.close()}
 });
@@ -226,4 +229,18 @@ test('stdio DEFAULT exposes same 2 tools but much smaller enum choices and contr
   await client.close();
   rmSync(dir,{recursive:true,force:true});
  }
+});
+
+test('everyday writes forgive what Xiyue got wrong in practice: slot names, missing requestId, estimated macros on a fix',async()=>{
+ const f=makeFixture();try{
+  const items=[{name:'清汤面',weightGrams:400,p:12,c:60,f:6}];
+  const a=exec(f.api,'meal',{mealSlot:'夜宵',items});                 // 夜宵 → 加餐, requestId derived from content
+  const again=exec(f.api,'meal',{mealSlot:'夜宵',items});             // the same call retried is not a second meal
+  assert.deepEqual(again.mealIds,a.mealIds);
+  const day=f.family.memberTool('b','get_meal_history',{});
+  assert.equal(day.meals.length,1);assert.equal(day.meals[0].slot,'加餐');
+  const fix=exec(f.api,'correct',{mealId:a.mealIds[0],name:'草莓吐司',weightGrams:130,p:6,c:35,f:9});
+  assert.equal(fix.after.c,35);
+  assert.throws(()=>exec(f.api,'correct',{mealId:a.mealIds[0],weightGrams:20,p:10,c:10,f:10}),/不能超过/); // real checks stay
+ }finally{f.close();}
 });

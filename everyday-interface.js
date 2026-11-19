@@ -11,7 +11,22 @@ export const EVERYDAY_READS = Object.freeze(['summary', 'meals', 'foods', 'recip
 export const EVERYDAY_WRITES = Object.freeze(['meal', 'correct', 'health', 'photo_stage', 'photo_confirm', 'photo_discard', 'recipe_save', 'plan_set', 'plan_remove', 'plan_log', 'food_add']);
 export const EVERYDAY_PERIODS = Object.freeze(['today', '7d', '30d']);
 
+import { createHash } from 'node:crypto';
+
 const own = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+// What people (and agents) call a meal → the ledger's slot names.
+const SLOT_ALIASES = {夜宵:'加餐',宵夜:'加餐',零食:'加餐',下午茶:'加餐',点心:'加餐',snack:'加餐',
+  breakfast:'早餐',lunch:'午餐',dinner:'晚餐',supper:'晚餐',早饭:'早餐',午饭:'午餐',晚饭:'晚餐'};
+const slot = value => typeof value === 'string' ? (SLOT_ALIASES[value.trim().toLowerCase()] ?? SLOT_ALIASES[value.trim()] ?? value) : value;
+
+// A write without requestId gets one from its own content: the same call retried is the same request,
+// so the engine's idempotency still holds; a different call is a different request.
+function withRequestId(memberId, operation, args) {
+  if (args.requestId || !['meal','correct','photo_stage','photo_confirm','plan_log','recipe_save'].includes(operation)) return args;
+  const digest = createHash('sha256').update(JSON.stringify([memberId ?? null, operation, args])).digest('hex').slice(0, 24);
+  return {...args, requestId: `auto-${operation}-${digest}`};
+}
 
 export function createEverydayInterface(compact) {
   if (!compact || typeof compact.query !== 'function' || typeof compact.execute !== 'function') {
@@ -55,6 +70,8 @@ export function createEverydayInterface(compact) {
     if (!args || typeof args !== 'object' || Array.isArray(args)) {
       throw new Error('args must be an object');
     }
+    if (own(args, 'mealSlot')) args = {...args, mealSlot: slot(args.mealSlot)};
+    args = withRequestId(memberId, operation, args);
     if (operation === 'meal') {
       // One user intent, two provenance/precision modes. The underlying
       // engine still validates exact food IDs, macros and idempotency.
@@ -72,10 +89,9 @@ export function createEverydayInterface(compact) {
       // The caller supplies a known ID if available, otherwise the engine
       // resolves a recent meal from foodName/date/slot; ambiguity fails closed.
       if (own(args,'mealId')) {
-        if (!own(args,'expectedRevision')) throw new Error('An identified correction requires expectedRevision');
         return compact.execute({memberId,operation:'correction',args,includeContext});
       }
-      if (!args.foodName) throw new Error('Correction requires mealId+expectedRevision or foodName');
+      if (!args.foodName) throw new Error('Correction requires mealId or foodName');
       return compact.execute({memberId,operation:'recent_correction',args,includeContext});
     }
     if (operation === 'health') {

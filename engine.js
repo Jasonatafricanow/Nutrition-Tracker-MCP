@@ -190,13 +190,14 @@ const confirmationEvidenceSchema = z.object({
 }).strict();
 const editMealSchema = {
   mealId: z.string().min(1),
-  expectedRevision: z.number().int().min(0),
+  // Omitted = the current revision. Concurrent editors (the Dashboard) pass it; a lone agent need not.
+  expectedRevision: z.number().int().min(0).optional(),
   requestId: z.string().trim().min(1).max(128),
   weightGrams: z.number().positive().max(5000),
   foodId: z.string().optional(),
   name: z.string().trim().min(1).max(120).optional(),
   portionSource: z.enum(["measured", "user_estimate", "visual_estimate"]).optional(),
-  nutritionSource: z.enum(["food_label","trusted_database","user_supplied"]).optional(),
+  nutritionSource: z.enum(["food_label","trusted_database","user_supplied","estimate"]).optional(),
   p: z.number().min(0).optional(),c: z.number().min(0).optional(),f: z.number().min(0).optional()
 };
 const photoDecisionSchema = z.object({
@@ -1461,7 +1462,8 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         }
         const before=q("SELECT * FROM meal_logs WHERE id=?").get(a.mealId);
         if(!before)throw new ToolError("未找到需要修改的餐食");
-        if(before.revision!==a.expectedRevision)throw new ToolError("餐食版本已变化；请重新读取历史后再修改");
+        const expected=a.expectedRevision??before.revision;
+        if(before.revision!==expected)throw new ToolError("餐食版本已变化；请重新读取历史后再修改");
         const nutrients=[a.p,a.c,a.f];
         const hasAny=nutrients.some(x=>x!==undefined),hasAll=nutrients.every(x=>x!==undefined);
         if(hasAny && !hasAll)throw new ToolError("必须同时提供 p、c、f");
@@ -1474,7 +1476,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
           const ratio=a.weightGrams/100;
           p=round1(food.p*ratio);c=round1(food.c*ratio);f=round1(food.f*ratio);
         }else if(hasAll){
-          if(!a.nutritionSource)throw new ToolError("直接输入营养值需要营养来源");
+          // Without a stated source these are estimates, as with log_estimated_meal.
           p=a.p;c=a.c;f=a.f;
         }else{
           if(a.nutritionSource)throw new ToolError("没有新营养值时不能指定新的营养来源");
@@ -1486,7 +1488,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         const nowValue=nowIso();
         const change=q(`UPDATE meal_logs SET name=?,weight_g=?,p=?,c=?,f=?,
           portion_source=COALESCE(?,portion_source),revision=revision+1 WHERE id=? AND revision=?`)
-          .run(name,a.weightGrams,p,c,f,a.portionSource??null,a.mealId,a.expectedRevision);
+          .run(name,a.weightGrams,p,c,f,a.portionSource??null,a.mealId,expected);
         if(change.changes!==1)throw new ToolError("餐食版本冲突");
         const after=q("SELECT * FROM meal_logs WHERE id=?").get(a.mealId);
         q("INSERT INTO meal_corrections(id,meal_id,request_id,changed_at,actor,before_json,after_json) VALUES (?,?,?,?,?,?,?)")
