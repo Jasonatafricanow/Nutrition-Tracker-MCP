@@ -41,6 +41,10 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
       dose TEXT NOT NULL DEFAULT '', min_interval_hours REAL, max_per_day INTEGER, note TEXT,
       active INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS medication_events (
+      id TEXT PRIMARY KEY, medication_id TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL,
+      before_json TEXT, after_json TEXT
+    );
     CREATE TABLE IF NOT EXISTS workouts (
       id TEXT PRIMARY KEY, member_id TEXT NOT NULL, date TEXT NOT NULL, activity TEXT NOT NULL,
       duration_min INTEGER, source TEXT NOT NULL, source_event_id TEXT UNIQUE, note TEXT, created_at TEXT NOT NULL
@@ -179,7 +183,11 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
       q(`INSERT INTO medications VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET aliases=excluded.aliases,
          for_members=excluded.for_members, dose=excluded.dose, min_interval_hours=excluded.min_interval_hours,
          max_per_day=excluded.max_per_day, note=excluded.note, active=excluded.active, updated_at=excluded.updated_at`).run(...row);
-      return { ok: true, created: !prev, medication: medRow(q('SELECT * FROM medications WHERE id=?').get(id)) };
+      const saved = medRow(q('SELECT * FROM medications WHERE id=?').get(id));
+      // Keep every cabinet change: a medicine that was edited or put away still shows in the history.
+      q('INSERT INTO medication_events VALUES(?,?,?,?,?,?)').run(randomUUID(), id, now().toISOString(),
+        !prev ? 'add' : prev.active && !active ? 'retire' : 'edit', prev ? JSON.stringify(medRow(prev)) : null, JSON.stringify(saved));
+      return { ok: true, created: !prev, medication: saved };
     });
   }
   const findMed = name => {
@@ -259,5 +267,66 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
     return { ok: true, from, members: Object.values(byMember), note: '时长没说的不计入分钟数；运动只来自用户说过的话（经 statebar 核对）' };
   }
 
-  return { pantryAdd, pantryUse, pantryDiscard, pantryEdit, pantry, medSave, logDose, meds, logWorkout, workouts };
+  // ---------- history ----------
+  // Everything the household recorded between two local dates (inclusive): fridge in/out, cabinet changes,
+  // doses and workouts, newest first, plus a summary of the period. Nothing here is ever overwritten.
+  const dayOf = iso => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+  const PANTRY_ACTION = { add: '放进冰箱', use: '用了一些', used_up: '用完', discard: '丢掉', edit: '改了记录' };
+  function history({ from, to, memberId } = {}) {
+    to = to ?? today(); from = from ?? plusDays(to, -6);
+    if (![from, to].every(d => /^\d{4}-\d{2}-\d{2}$/.test(d)) || from > to) throw Error('from/to must be YYYY-MM-DD, from <= to');
+    if (daysBetween(from, to) > 366) throw Error('at most one year at a time');
+    // Timestamps are UTC; widen by a day each side, then keep only those whose local date is in range.
+    const lo = plusDays(from, -1) + 'T00:00:00Z', hi = plusDays(to, 2) + 'T00:00:00Z';
+    const inRange = d => d >= from && d <= to;
+    const events = [];
+    for (const r of q(`SELECT e.*, i.name, i.quantity AS current_quantity FROM pantry_events e JOIN pantry_items i ON i.id=e.item_id
+                       WHERE e.at >= ? AND e.at < ?`).all(lo, hi)) {
+      const day = dayOf(r.at);
+      if (!inRange(day)) continue;
+      events.push({ kind: 'pantry', action: r.action, at: r.at, day, title: r.name, label: PANTRY_ACTION[r.action] ?? r.action,
+        before: r.before_quantity ?? undefined, after: r.after_quantity ?? undefined, note: r.note ?? undefined });
+    }
+    for (const r of q('SELECT * FROM medication_events WHERE at >= ? AND at < ?').all(lo, hi)) {
+      const day = dayOf(r.at);
+      if (!inRange(day)) continue;
+      const after = JSON.parse(r.after_json);
+      events.push({ kind: 'cabinet', action: r.action, at: r.at, day, title: after.name,
+        label: { add: '加进药箱', edit: '改了药箱登记', retire: '收起不用' }[r.action] ?? r.action, dose: after.dose || undefined });
+    }
+    for (const r of q(`SELECT * FROM doses WHERE taken_at >= ? AND taken_at < ? ${memberId ? 'AND member_id=?' : ''}`)
+      .all(lo, hi, ...(memberId ? [memberId] : []))) {
+      const day = dayOf(r.taken_at);
+      if (!inRange(day)) continue;
+      events.push({ kind: 'dose', at: r.taken_at, day, memberId: r.member_id, title: r.medication_name, label: '吃药',
+        amount: r.amount ?? undefined, note: r.note ?? undefined });
+    }
+    for (const r of q(`SELECT * FROM workouts WHERE date >= ? AND date <= ? ${memberId ? 'AND member_id=?' : ''}`)
+      .all(from, to, ...(memberId ? [memberId] : []))) {
+      events.push({ kind: 'workout', at: r.created_at, day: r.date, memberId: r.member_id, title: r.activity, label: '运动',
+        durationMin: r.duration_min ?? undefined, note: r.note ?? undefined });
+    }
+    events.sort((a, b) => b.day.localeCompare(a.day) || b.at.localeCompare(a.at));
+
+    const people = {};
+    const person = id => people[id] ??= { memberId: id, workouts: 0, minutes: 0, activeDays: 0, activities: {}, doses: 0, medications: {} };
+    const activeDays = {};
+    for (const e of events) {
+      if (e.kind === 'workout') {
+        const p = person(e.memberId);
+        p.workouts += 1; p.minutes += e.durationMin ?? 0; p.activities[e.title] = (p.activities[e.title] ?? 0) + 1;
+        (activeDays[e.memberId] ??= new Set()).add(e.day);
+      }
+      if (e.kind === 'dose') { const p = person(e.memberId); p.doses += 1; p.medications[e.title] = (p.medications[e.title] ?? 0) + 1; }
+    }
+    for (const [id, set] of Object.entries(activeDays)) people[id].activeDays = set.size;
+    const pantryEv = events.filter(e => e.kind === 'pantry');
+    const names = act => [...new Set(pantryEv.filter(e => e.action === act).map(e => e.title))];
+    return { ok: true, from, to, days: daysBetween(from, to) + 1, events,
+      summary: { members: Object.values(people),
+        pantry: { added: names('add'), usedUp: names('used_up'), discarded: names('discard') },
+        cabinetChanges: events.filter(e => e.kind === 'cabinet').length } };
+  }
+
+  return { pantryAdd, pantryUse, pantryDiscard, pantryEdit, pantry, medSave, logDose, meds, logWorkout, workouts, history };
 }

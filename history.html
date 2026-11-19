@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>家庭记录 · Nutrition Tracker MCP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,400&family=Instrument+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500&family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper: #F4F0E8; --paper-2: #ECE6DA; --ink: #1C1B19; --ink-2: #57524A; --rule: #CFC7B8;
+      --accent: #B53A27; --lv-high: #86570F; --lv-med: #625D54; --lv-low: #4C6644;
+      --c-workout: var(--lv-low); --c-dose: var(--lv-high); --c-pantry: var(--ink-2); --c-cabinet: var(--lv-med);
+      --serif: "Noto Serif SC", "Songti SC", serif;
+      --display: "Fraunces", "Noto Serif SC", serif;
+      --sans: "Instrument Sans", "Noto Sans SC", "PingFang SC", sans-serif;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --paper: #1A1916; --paper-2: #23211D; --ink: #ECE6DA; --ink-2: #B3AC9F; --rule: #3A3731;
+        --accent: #E0674F; --lv-high: #D4A04E; --lv-med: #A39C90; --lv-low: #8FB083;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --paper: #1A1916; --paper-2: #23211D; --ink: #ECE6DA; --ink-2: #B3AC9F; --rule: #3A3731;
+      --accent: #E0674F; --lv-high: #D4A04E; --lv-med: #A39C90; --lv-low: #8FB083;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 400 14px/1.6 var(--sans);
+      font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 40px 64px; }
+    @media (max-width: 720px) { .wrap { padding: 0 16px 48px; } }
+    a { color: inherit; }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .num { font-family: var(--display); font-variant-numeric: lining-nums tabular-nums; }
+    .muted { color: var(--ink-2); }
+
+    /* 刊头 */
+    .masthead { padding: 32px 0 16px; border-bottom: 2px solid var(--ink); display: flex; justify-content: space-between;
+      align-items: flex-end; gap: 16px 24px; flex-wrap: wrap; }
+    .masthead h1 { margin: 0; font: 600 34px/1.1 var(--serif); letter-spacing: .01em; }
+    .masthead h1 em { font: italic 400 22px var(--display); color: var(--ink-2); margin-left: 12px; letter-spacing: 0; }
+    .back { font-size: 12px; color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--rule); }
+    .back:hover { color: var(--ink); border-color: var(--ink); }
+
+    /* 时间控制 */
+    .controls { display: flex; justify-content: space-between; align-items: center; gap: 12px 20px; flex-wrap: wrap; padding: 16px 0; border-bottom: 1px solid var(--rule); }
+    .seg { display: inline-flex; border: 1px solid var(--ink); border-radius: 999px; overflow: hidden; }
+    .seg button { padding: 5px 16px; font-size: 13px; }
+    .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+    .period { display: flex; align-items: center; gap: 10px; }
+    .period .label { font: 500 18px/1.2 var(--serif); min-width: 10em; text-align: center; }
+    .arrow { width: 32px; height: 32px; border: 1px solid var(--rule); border-radius: 50%; font-size: 16px; line-height: 1; }
+    .arrow:hover:not(:disabled) { border-color: var(--ink); }
+    .arrow:disabled { opacity: .3; cursor: default; }
+    .now { font-size: 12px; color: var(--ink-2); border-bottom: 1px solid var(--rule); }
+    .filters { display: flex; gap: 8px 18px; flex-wrap: wrap; padding: 12px 0 0; font-size: 13px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip { padding: 3px 12px; border: 1px solid var(--rule); border-radius: 999px; color: var(--ink-2); }
+    .chip[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); background: var(--paper-2); }
+    .chip i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+
+    /* 总结框 */
+    .summary { margin: 28px 0 8px; background: var(--paper-2); border: 1px solid var(--rule); border-radius: 10px; padding: 24px 28px; position: relative; }
+    .summary::before { content: ""; position: absolute; left: 0; top: 24px; bottom: 24px; width: 3px; background: var(--accent); border-radius: 0 2px 2px 0; }
+    .summary h2 { margin: 0 0 4px; font: 600 13px var(--sans); letter-spacing: .12em; color: var(--ink-2); }
+    .lede { margin: 0 0 20px; font: 500 19px/1.7 var(--serif); }
+    .lede b { font-weight: 700; }
+    .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--rule); }
+    .stat { padding: 14px 16px 4px 0; }
+    .stat + .stat { padding-left: 16px; border-left: 1px solid var(--rule); }
+    .stat .k { font-size: 12px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
+    .stat .k i { width: 7px; height: 7px; border-radius: 50%; }
+    .stat .v { font-size: 34px; line-height: 1.15; font-weight: 500; }
+    .stat .v small { font: 400 13px var(--sans); color: var(--ink-2); margin-left: 4px; }
+    .stat .d { font-size: 12px; color: var(--ink-2); min-height: 1.6em; }
+    @media (max-width: 720px) {
+      .summary { padding: 20px 18px; }
+      .lede { font-size: 16px; }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .stat:nth-child(3) { padding-left: 0; border-left: 0; }
+      .stat:nth-child(n+3) { border-top: 1px solid var(--rule); }
+      .stat .v { font-size: 28px; }
+    }
+    .people { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 18px; }
+    .person { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; font-size: 13px; }
+    .person h3 { margin: 0 0 6px; font: 600 15px var(--serif); display: flex; justify-content: space-between; align-items: baseline; }
+    .person h3 span { font: 400 12px var(--sans); color: var(--ink-2); }
+    .person p { margin: 2px 0; color: var(--ink-2); }
+    .person p b { color: var(--ink); font-weight: 500; }
+
+    /* 日历条 */
+    .strip { display: grid; gap: 4px; margin: 26px 0 6px; }
+    .day-cell { border: 1px solid var(--rule); border-radius: 6px; padding: 6px 4px 8px; text-align: center; min-height: 64px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .day-cell.has { cursor: pointer; }
+    .day-cell.has:hover { border-color: var(--ink); }
+    .day-cell.today { border-color: var(--accent); }
+    .day-cell.out { opacity: .25; border-style: dashed; }
+    .day-cell .dn { font-size: 11px; color: var(--ink-2); line-height: 1.2; }
+    .day-cell .dd { font: 500 15px/1 var(--display); }
+    .marks { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; max-width: 46px; }
+    .marks i { width: 6px; height: 6px; border-radius: 50%; }
+    .legend { display: flex; gap: 14px; font-size: 11px; color: var(--ink-2); justify-content: flex-end; flex-wrap: wrap; }
+    .legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+
+    /* 时间线 */
+    .timeline { margin-top: 26px; }
+    .day { display: grid; grid-template-columns: 120px 1fr; gap: 20px; border-top: 1px solid var(--ink); padding: 14px 0 6px; scroll-margin-top: 16px; }
+    .day h3 { margin: 0; font: 600 16px/1.3 var(--serif); }
+    .day h3 small { display: block; font: 400 12px var(--sans); color: var(--ink-2); margin-top: 2px; }
+    @media (max-width: 720px) { .day { grid-template-columns: 1fr; gap: 6px; } .day h3 small { display: inline; margin-left: 8px; } }
+    .ev { display: grid; grid-template-columns: 52px 14px 1fr; align-items: baseline; gap: 0 8px; padding: 7px 0; border-bottom: 1px solid var(--rule); }
+    .ev:last-child { border-bottom: 0; }
+    .ev time { font-size: 12px; color: var(--ink-2); }
+    .ev .dot { width: 8px; height: 8px; border-radius: 50%; align-self: center; }
+    .ev .what { display: flex; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; }
+    .ev .what b { font-weight: 500; }
+    .ev .tag { font-size: 12px; color: var(--ink-2); margin-left: 6px; }
+    .ev .side { font-size: 12px; color: var(--ink-2); }
+    .ev.discard .what b { color: var(--accent); }
+    .empty { padding: 40px 0; text-align: center; color: var(--ink-2); font: 500 16px var(--serif); border-top: 1px solid var(--ink); margin-top: 26px; }
+    .reveal { animation: rise .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+    @media (prefers-reduced-motion: reduce) { .reveal { animation: none; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="masthead">
+      <h1>家庭记录<em>by date</em></h1>
+      <a class="back" href="/">← 回到今日</a>
+    </header>
+
+    <div class="controls">
+      <div class="seg" role="group" aria-label="时间范围">
+        <button type="button" data-range="day">日</button>
+        <button type="button" data-range="week">周</button>
+        <button type="button" data-range="month">月</button>
+      </div>
+      <div class="period">
+        <button type="button" class="arrow" id="prev" aria-label="上一段">‹</button>
+        <span class="label" id="period-label">—</span>
+        <button type="button" class="arrow" id="next" aria-label="下一段">›</button>
+      </div>
+      <button type="button" class="now" id="go-now">回到现在</button>
+    </div>
+    <div class="filters">
+      <div class="chips" id="member-chips"></div>
+      <div class="chips" id="kind-chips"></div>
+    </div>
+
+    <section class="summary reveal" id="summary" aria-live="polite">
+      <h2>总结</h2>
+      <p class="lede" id="lede">正在读取…</p>
+      <div class="stats" id="stats"></div>
+      <div class="people" id="people"></div>
+    </section>
+
+    <div class="strip" id="strip"></div>
+    <div class="legend" id="legend"></div>
+    <div id="timeline" class="timeline"></div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const TZ = 'Asia/Shanghai';
+const KIND = { workout: ['运动', 'var(--c-workout)'], dose: ['吃药', 'var(--c-dose)'], pantry: ['冰箱', 'var(--c-pantry)'], cabinet: ['药箱', 'var(--c-cabinet)'] };
+const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+
+// Dates are plain YYYY-MM-DD strings in Shanghai time; arithmetic at UTC noon avoids DST/offset edges.
+const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
+const parse = d => new Date(d + 'T12:00:00Z');
+const fmt = dt => dt.toISOString().slice(0, 10);
+const add = (d, n) => fmt(new Date(parse(d).getTime() + n * 864e5));
+const weekday = d => parse(d).getUTCDay();
+const cn = d => `${+d.slice(5, 7)}月${+d.slice(8)}日`;
+const clock = iso => new Intl.DateTimeFormat('zh-CN', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+
+const qs = new URLSearchParams(location.search);
+const state = { range: qs.get('range') || 'week', anchor: qs.get('d') || today(), member: qs.get('member') || '', kind: qs.get('kind') || '' };
+let names = {}, data = null;
+
+function span() {
+  const a = state.anchor;
+  if (state.range === 'day') return [a, a];
+  if (state.range === 'week') { const from = add(a, -((weekday(a) + 6) % 7)); return [from, add(from, 6)]; }
+  const from = a.slice(0, 8) + '01';
+  const next = parse(from); next.setUTCMonth(next.getUTCMonth() + 1);
+  return [from, add(fmt(next), -1)];
+}
+function shift(dir) {
+  const a = parse(state.anchor);
+  if (state.range === 'day') a.setUTCDate(a.getUTCDate() + dir);
+  else if (state.range === 'week') a.setUTCDate(a.getUTCDate() + 7 * dir);
+  else { a.setUTCDate(1); a.setUTCMonth(a.getUTCMonth() + dir); }
+  state.anchor = fmt(a); load();
+}
+function label([from, to]) {
+  if (state.range === 'day') return `${cn(from)} 周${WEEK[weekday(from)]}`;
+  if (state.range === 'month') return `${from.slice(0, 4)}年${+from.slice(5, 7)}月`;
+  return `${cn(from)} – ${cn(to)}`;
+}
+
+function chips() {
+  const members = [['', '全家'], ...Object.entries(names)];
+  $('member-chips').innerHTML = members.map(([id, n]) => `<button type="button" class="chip" data-member="${esc(id)}" aria-pressed="${state.member === id}">${esc(n)}</button>`).join('');
+  const kinds = [['', '全部', null], ['workout', ...KIND.workout], ['dose', ...KIND.dose], ['pantry', ...KIND.pantry], ['cabinet', ...KIND.cabinet]];
+  $('kind-chips').innerHTML = kinds.map(([k, n, c]) => `<button type="button" class="chip" data-kind="${k}" aria-pressed="${state.kind === k}">${c ? `<i style="background:${c}"></i>` : ''}${n}</button>`).join('');
+  $('legend').innerHTML = Object.values(KIND).map(([n, c]) => `<span><i style="background:${c}"></i>${n}</span>`).join('');
+}
+
+// The fridge and the medicine cabinet are shared; a member filter narrows doses and workouts only.
+const visible = () => (data?.events || []).filter(e =>
+  (!state.kind || e.kind === state.kind) && (!state.member || !e.memberId || e.memberId === state.member) &&
+  !(state.member && (e.kind === 'pantry' || e.kind === 'cabinet') && state.kind !== e.kind));
+const who = id => names[id] || id;
+const ranked = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]);
+const join = arr => arr.length <= 1 ? arr.join('') : arr.slice(0, -1).join('、') + '和' + arr.at(-1);
+const listNames = (arr, n = 3) => arr.length > n ? arr.slice(0, n).join('、') + ` 等 ${arr.length} 样` : arr.join('、');
+
+function summary() {
+  const s = data.summary;
+  const members = s.members.filter(m => !state.member || m.memberId === state.member);
+  const showWorkout = !state.kind || state.kind === 'workout', showDose = !state.kind || state.kind === 'dose';
+  const showPantry = (!state.kind && !state.member) || state.kind === 'pantry';
+  const when = { day: '这天', week: '这周', month: '这个月' }[state.range];
+  const isNow = (([f, t]) => today() >= f && today() <= t)(span());
+  const period = isNow ? when : { day: '那天', week: '那周', month: '那个月' }[state.range];
+
+  const sentences = [];
+  if (showWorkout) for (const m of members.filter(m => m.workouts)) {
+    const fav = ranked(m.activities)[0];
+    sentences.push(`<b>${esc(who(m.memberId))}</b>运动了 ${m.workouts} 次${m.minutes ? `、共 ${m.minutes} 分钟` : ''}${m.workouts > 1 && fav[1] > 1 ? `，${esc(fav[0])}最多` : `，${esc(join(ranked(m.activities).map(a => a[0])))}`}`);
+  }
+  if (showDose) for (const m of members.filter(m => m.doses))
+    sentences.push(`<b>${esc(who(m.memberId))}</b>吃了 ${esc(join(ranked(m.medications).map(([n, c]) => `${n} ${c} 次`)))}`);
+  if (showPantry) {
+    const p = s.pantry;
+    if (p.added.length) sentences.push(`冰箱进了 ${esc(listNames(p.added))}`);
+    if (p.usedUp.length) sentences.push(`用完了 ${esc(listNames(p.usedUp))}`);
+    if (p.discarded.length) sentences.push(`丢掉了 <b style="color:var(--accent)">${esc(listNames(p.discarded))}</b>`);
+  }
+  $('lede').innerHTML = sentences.length ? `${period}，${sentences.join('；')}。` : `${period}还没有记录。`;
+
+  const sum = k => members.reduce((n, m) => n + m[k], 0);
+  const activeDays = new Set((data.events).filter(e => e.kind === 'workout' && (!state.member || e.memberId === state.member)).map(e => e.day)).size;
+  const stats = [];
+  if (showWorkout) stats.push(['运动', KIND.workout[1], sum('workouts'), '次', `${sum('minutes')} 分钟 · ${activeDays}/${data.days} 天有运动`]);
+  if (showDose) stats.push(['吃药', KIND.dose[1], sum('doses'), '次', join([...new Set(members.flatMap(m => Object.keys(m.medications)))]) || '—']);
+  if (showPantry) {
+    stats.push(['进冰箱', KIND.pantry[1], s.pantry.added.length, '样', `用完 ${s.pantry.usedUp.length} 样`]);
+    stats.push(['丢掉', 'var(--accent)', s.pantry.discarded.length, '样', s.pantry.discarded.length ? listNames(s.pantry.discarded, 2) : '没有浪费']);
+  }
+  if (state.kind === 'cabinet' || (!state.kind && !state.member)) if (stats.length < 4) stats.push(['药箱变动', KIND.cabinet[1], s.cabinetChanges, '处', '']);
+  $('stats').innerHTML = stats.map(([k, c, v, u, d]) =>
+    `<div class="stat"><div class="k"><i style="background:${c}"></i>${k}</div><div class="v num">${v}<small>${u}</small></div><div class="d">${esc(d)}</div></div>`).join('');
+
+  const people = (showWorkout || showDose) && state.range !== 'day' ? members.filter(m => m.workouts || m.doses) : [];
+  $('people').innerHTML = people.map(m => `<div class="person"><h3>${esc(who(m.memberId))}<span>${m.activeDays ? `${m.activeDays} 天有运动` : ''}</span></h3>
+    ${showWorkout && m.workouts ? `<p><b>${m.workouts}</b> 次运动 · <b>${m.minutes}</b> 分钟 · ${esc(ranked(m.activities).map(([n, c]) => c > 1 ? `${n}×${c}` : n).join(' '))}</p>` : ''}
+    ${showDose && m.doses ? `<p><b>${m.doses}</b> 次吃药 · ${esc(ranked(m.medications).map(([n, c]) => `${n}×${c}`).join(' '))}</p>` : ''}</div>`).join('');
+}
+
+function strip([from, to]) {
+  if (state.range === 'day') { $('strip').innerHTML = ''; $('legend').style.display = 'none'; return; }
+  $('legend').style.display = '';
+  const byDay = {};
+  for (const e of visible()) (byDay[e.day] ??= []).push(e);
+  const start = state.range === 'month' ? add(from, -((weekday(from) + 6) % 7)) : from;
+  const cells = [];
+  for (let d = start; d <= to || (state.range === 'month' && (weekday(d) + 6) % 7 !== 0); d = add(d, 1)) {
+    const evs = byDay[d] || [], out = d < from || d > to;
+    const marks = evs.slice(0, 12).map(e => `<i style="background:${e.action === 'discard' ? 'var(--accent)' : KIND[e.kind][1]}"></i>`).join('');
+    cells.push(`<div class="day-cell${evs.length && !out ? ' has' : ''}${d === today() ? ' today' : ''}${out ? ' out' : ''}" ${evs.length && !out ? `data-day="${d}" title="${evs.length} 条"` : ''}>
+      <span class="dn">${state.range === 'week' ? '周' + WEEK[weekday(d)] : ''}</span><span class="dd">${+d.slice(8)}</span><span class="marks">${out ? '' : marks}</span></div>`);
+    if (cells.length > 42) break;
+  }
+  const head = state.range === 'month' ? ['一', '二', '三', '四', '五', '六', '日'].map(w => `<div class="dn muted" style="text-align:center;font-size:11px">周${w}</div>`).join('') : '';
+  $('strip').style.gridTemplateColumns = 'repeat(7, minmax(0, 1fr))';
+  $('strip').innerHTML = head + cells.join('');
+}
+
+function detail(e) {
+  if (e.kind === 'workout') return e.durationMin ? `${e.durationMin} 分钟` : '';
+  if (e.kind === 'dose') return e.amount || '';
+  if (e.kind === 'cabinet') return e.dose || '';
+  if (e.action === 'add') return e.after || '';
+  if (e.action === 'use' || e.action === 'edit') return [e.before, e.after].filter(Boolean).join(' → ');
+  return e.before ? `原有 ${e.before}` : '';
+}
+function timeline() {
+  const evs = visible();
+  if (!evs.length) { $('timeline').innerHTML = `<div class="empty">这段时间还没有记录</div>`; return; }
+  const days = [];
+  for (const e of evs) { if (days.at(-1)?.day !== e.day) days.push({ day: e.day, evs: [] }); days.at(-1).evs.push(e); }
+  $('timeline').innerHTML = days.map(({ day, evs }) => `<section class="day" id="d-${day}">
+    <h3>${cn(day)}<small>周${WEEK[weekday(day)]}${day === today() ? ' · 今天' : ''} · ${evs.length} 条</small></h3>
+    <div>${evs.map(e => `<div class="ev ${e.action === 'discard' ? 'discard' : ''}">
+      <time>${e.kind === 'workout' ? '' : clock(e.at)}</time>
+      <span class="dot" style="background:${e.action === 'discard' ? 'var(--accent)' : KIND[e.kind][1]}"></span>
+      <div class="what"><span>${e.memberId ? `${esc(who(e.memberId))} · ` : ''}<b>${esc(e.title)}</b><span class="tag">${esc(e.label)}</span></span>
+        <span class="side">${esc(detail(e))}</span></div></div>`).join('')}</div></section>`).join('');
+}
+
+function render() {
+  const sp = span();
+  $('period-label').textContent = label(sp);
+  $('next').disabled = sp[1] >= today();
+  document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.range === state.range));
+  chips();
+  if (!data) return;
+  summary(); strip(sp); timeline();
+}
+async function load() {
+  const [from, to] = span();
+  const p = new URLSearchParams({ range: state.range, d: state.anchor });
+  if (state.member) p.set('member', state.member);
+  if (state.kind) p.set('kind', state.kind);
+  history.replaceState(null, '', '?' + p);
+  render();
+  try {
+    const r = await fetch(`/api/household?view=history&from=${from}&to=${to > today() ? today() : to}`);
+    if (!r.ok) throw Error();
+    data = await r.json();
+  } catch { $('lede').textContent = '读取不到记录，稍后会自动重试。'; return; }
+  render();
+}
+
+document.querySelector('.seg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { state.range = b.dataset.range; load(); } });
+$('prev').onclick = () => shift(-1);
+$('next').onclick = () => shift(1);
+$('go-now').onclick = () => { state.anchor = today(); load(); };
+$('member-chips').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { state.member = b.dataset.member; load(); } });
+$('kind-chips').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { state.kind = b.dataset.kind; load(); } });
+$('strip').addEventListener('click', e => { const c = e.target.closest('[data-day]'); if (c) $('d-' + c.dataset.day)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+document.addEventListener('keydown', e => { if (e.target === document.body && e.key === 'ArrowLeft') shift(-1); if (e.target === document.body && e.key === 'ArrowRight' && !$('next').disabled) shift(1); });
+
+fetch('/api/household').then(r => r.ok ? r.json() : null).then(h => {
+  names = Object.fromEntries((h?.members || []).map(m => [m.memberId, m.name]));
+}).catch(() => {}).finally(load);
+setInterval(load, 30000);
+</script>
+</body>
+</html>

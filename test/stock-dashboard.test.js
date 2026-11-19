@@ -12,7 +12,7 @@ import {createHousehold} from '../household.js';
 const TOKEN='stock-dashboard-webhook-test-token';
 const freePort=()=>new Promise((resolve,reject)=>{const s=createServer();s.on('error',reject);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});
 
-test('dashboard stock views return fridge, cabinet and workouts; cross-origin reads are denied',async()=>{
+test('dashboard stock views return fridge, cabinet, workouts and history; cross-origin reads are denied',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'stock-dashboard-'));
  const cfg=path.join(dir,'household.json');
  writeFileSync(cfg,JSON.stringify({timeZone:'Asia/Shanghai',members:[{id:'owner',name:'我',mode:'performance'},{id:'kid',name:'娃',mode:'general'}]}));
@@ -47,7 +47,14 @@ test('dashboard stock views return fridge, cabinet and workouts; cross-origin re
   const wo=await view('workouts');
   assert.deepEqual(wo.members.map(m=>[m.memberId,m.sessionsThisWeek,m.minutesThisWeek,m.recent.length]),[['owner',1,30,1]]);
 
-  for(const v of ['pantry','meds','workouts'])
+  // History keeps every record of the period with a summary; nothing is overwritten.
+  const hist=await view(`history&from=${today}&to=${today}`);
+  assert.deepEqual(hist.events.map(e=>e.kind).sort(),['cabinet','dose','pantry','pantry','workout'].filter(k=>k!=='dose'||new Date(Date.now()-3600_000).toLocaleDateString('en-CA',{timeZone:'Asia/Shanghai'})===today).sort());
+  assert.deepEqual(hist.summary.pantry.added.sort(),['剩菜','牛奶'].sort());
+  assert.deepEqual(hist.summary.members.find(m=>m.memberId==='owner'),{memberId:'owner',workouts:1,minutes:30,activeDays:1,activities:{跑步:1},doses:0,medications:{}});
+  assert.equal((await fetch(base+'/api/household?view=history&from=2026-02-30x')).status,400);
+
+  for(const v of ['pantry','meds','workouts','history'])
    assert.equal((await fetch(base+'/api/household?view='+v,{headers:{Origin:'https://untrusted.example'}})).status,403);
  }finally{proc.kill();rmSync(dir,{recursive:true,force:true});}
 });

@@ -89,6 +89,7 @@ function run(tool, args, source) {
 }
 
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "viewport.html")));
+app.get("/history", (req, res) => res.sendFile(path.join(__dirname, "history.html")));
 app.get("/api/session", (req,res) => {
   if (!sameOrigin(req)) return res.status(403).json({ok:false});
   res.json({csrfToken});
@@ -108,6 +109,10 @@ app.get("/api/household", (req,res)=> {
     if(req.query.view==='pantry')return res.json(household.stock.pantry());
     if(req.query.view==='meds')return res.json(household.stock.meds());
     if(req.query.view==='workouts')return res.json(household.stock.workouts({days:7}));
+    if(req.query.view==='history'){
+      const str=v=>typeof v==='string'&&v?v:undefined;
+      return res.json(household.stock.history({from:str(req.query.from),to:str(req.query.to),memberId:str(req.query.memberId)}));
+    }
     res.json(household.context());
   } catch(e){res.status(400).json({error:e.message});}
 });
