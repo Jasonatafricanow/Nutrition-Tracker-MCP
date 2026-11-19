@@ -177,6 +177,38 @@ app.post("/api/health-webhook", authorizeWebhook, (req,res)=>{
   }catch(e){return res.status(400).json({ok:false,error:e.message});}
 });
 
+// A dose a member took (O40). Only statebar posts here, after checking the owner's own words; the agent
+// cannot log doses directly. Same token as the health webhook.
+app.post("/api/dose-webhook", authorizeWebhook, (req,res)=>{
+  const b=req.body||{};
+  try{
+    if(!household)return res.status(400).json({ok:false,error:"dose log requires household mode"});
+    const memberId=b.memberId??household.primary;
+    household.member(memberId);
+    if(!b.sourceEventId||typeof b.sourceEventId!=='string')return res.status(400).json({ok:false,error:"sourceEventId required"});
+    const out=household.stock.logDose({memberId,medication:b.medication,takenAt:b.takenAt,amount:b.amount,
+      sourceEventId:b.sourceEventId,source:b.source?`statebar:${b.source}`:'statebar',note:b.note});
+    broadcast();
+    return res.json(out);
+  }catch(e){return res.status(400).json({ok:false,error:e.message});}
+});
+
+// A workout a member did (O40). Only statebar posts here, after checking the owner's own words.
+app.post("/api/workout-webhook", authorizeWebhook, (req,res)=>{
+  const b=req.body||{};
+  try{
+    if(!household)return res.status(400).json({ok:false,error:"workout log requires household mode"});
+    const memberId=b.memberId??household.primary;
+    household.member(memberId);
+    if(!b.sourceEventId||typeof b.sourceEventId!=='string')return res.status(400).json({ok:false,error:"sourceEventId required"});
+    const out=household.stock.logWorkout({memberId,activity:b.activity,date:b.date,
+      durationMin:b.durationMin==null?undefined:Number(b.durationMin),sourceEventId:b.sourceEventId,
+      source:b.source?`statebar:${b.source}`:'statebar',note:b.note});
+    broadcast();
+    return res.json(out);
+  }catch(e){return res.status(400).json({ok:false,error:e.message});}
+});
+
 const httpServer = app.listen(PORT, HOST, () => log(`观察窗 http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}  DB=${path.basename(DB_PATH)}${DEMO ? " (demo)" : ""}`));
 httpServer.on("error", (e) => {
   if (e.code === "EADDRINUSE") log(`端口 ${PORT} 已被占用（大概率是另一个 Nutrition Tracker MCP 实例），本进程只提供 MCP 工具`);
@@ -214,7 +246,7 @@ function createMcpServer() {
   };
   if (surface==='everyday') {
     mcp.registerTool('nutrition_query', {
-      description:'Everyday nutrition reads. summary = today or observed-data 7d/30d report; meals = a dated meal ledger for review/correction; foods = one batch of 1–6 LOCAL food names; recipes = saved recipes with per-serving nutrition (recipeId for one); plan = meal plan for fromDate..toDate with targets, logged intake and gap; shopping = merged ingredient list for unlogged plan entries. For specialist tools use the opt-in compact/full profile.',
+      description:'Everyday nutrition reads. summary = today or observed-data 7d/30d report; meals = a dated meal ledger for review/correction; foods = one batch of 1–6 LOCAL food names; recipes = saved recipes with per-serving nutrition (recipeId for one); plan = meal plan for fromDate..toDate with targets, logged intake and gap; shopping = merged ingredient list for unlogged plan entries; pantry = what is in the fridge now, soonest to expire first (includeGone for used/discarded); meds = the medicine cabinet and, per member, last dose / next allowed time; workouts = what each member did this week and recently (from statebar). For specialist tools use the opt-in compact/full profile.',
       inputSchema:{
         view:z.enum(EVERYDAY_READS).default('summary'),
         memberId:z.string().optional().describe('Member attribution in household mode, required for personal 7d/30d report'),
@@ -227,11 +259,13 @@ function createMcpServer() {
         recipeId:z.string().optional().describe('recipes: return one recipe with ingredients and steps'),
         fromDate:z.string().optional().describe('plan/shopping: YYYY-MM-DD, default today'),
         toDate:z.string().optional().describe('plan/shopping: YYYY-MM-DD, at most 14 days'),
-        includeLogged:z.boolean().optional().describe('shopping: also count plan entries already logged')
+        includeLogged:z.boolean().optional().describe('shopping: also count plan entries already logged'),
+        includeGone:z.boolean().optional().describe('pantry: also list used-up and discarded items'),
+        days:z.number().int().min(1).max(90).optional().describe('workouts: how many days back, default 14')
       }
     },compactCall(everyday.query));
     mcp.registerTool('nutrition_execute', {
-      description:'Eleven user intents only: meal (text estimate by default; source=measured for foodId-based weighed entry), correct (name or ID), health (checkin or typed observation), photo_stage (DRAFT preview only), photo_confirm (after explicit one-time user approval), photo_discard (close one specified unconfirmed draft; does not book or delete ledger entries), recipe_save (name, servings, items=[{foodId,weightGrams}] for the WHOLE batch, steps?; recipeId to replace), plan_set (date, mealSlot, recipeId, servings, replace?; future dates allowed), plan_remove (entryId, unlogged only), plan_log (entryId, requestId, servings? actually eaten; books the entry split into ingredients, not for future dates), food_add (name, aliases?, state raw|cooked|as_sold, p/c/f per 100g, dataSource, requestId; server checks similar foods first and only adds after reviewedCandidateIds+confirmDistinct; daily cap). Open drafts remain reminders until the user confirms or clearly asks to dismiss that draft; never auto-discard. Underlying engine still verifies provenance, versions and idempotency.',
+      description:'Thirteen user intents only: meal (text estimate by default; source=measured for foodId-based weighed entry), correct (name or ID), health (checkin or typed observation), photo_stage (DRAFT preview only), photo_confirm (after explicit one-time user approval), photo_discard (close one specified unconfirmed draft; does not book or delete ledger entries), recipe_save (name, servings, items=[{foodId,weightGrams}] for the WHOLE batch, steps?; recipeId to replace), plan_set (date, mealSlot, recipeId, servings, replace?; future dates allowed), plan_remove (entryId, unlogged only), plan_log (entryId, requestId, servings? actually eaten; books the entry split into ingredients, not for future dates), food_add (name, aliases?, state raw|cooked|as_sold, p/c/f per 100g, dataSource, requestId; server checks similar foods first and only adds after reviewedCandidateIds+confirmDistinct; daily cap), pantry (action add|use|discard|edit: add items=[{name,quantity as said,shelfLifeDays? or expiresOn?}] from a receipt or a sentence; use name|itemId + remaining in the user words, empty = used up), med (save one medicine in the household cabinet: name, aliases?, forMembers?, dose, minIntervalHours?, maxPerDay?; doses TAKEN are not written here, they come from statebar). Open drafts remain reminders until the user confirms or clearly asks to dismiss that draft; never auto-discard. Underlying engine still verifies provenance, versions and idempotency.',
       inputSchema:{
         memberId:z.string().optional().describe('Member attribution, not separate authentication'),
         operation:z.enum(EVERYDAY_WRITES),
@@ -239,7 +273,8 @@ function createMcpServer() {
           mealSlot:z.string().optional(),source:z.enum(['text','measured']).optional(),
           items:z.array(z.object({
             name:z.string().optional(),foodId:z.string().optional(),
-            weightGrams:z.number().positive(),
+            weightGrams:z.number().positive().optional().describe('meal items: required (the engine checks); pantry items: not used'),
+            quantity:z.string().optional().describe('pantry items: amount as said, e.g. 600g, 4根'),
             p:z.number().min(0).optional(),c:z.number().min(0).optional(),
             f:z.number().min(0).optional()
           }).passthrough()).optional(),

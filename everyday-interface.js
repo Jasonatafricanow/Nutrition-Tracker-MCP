@@ -7,8 +7,8 @@
  *
  * Legacy compact and full interfaces remain selectable for migration.
  */
-export const EVERYDAY_READS = Object.freeze(['summary', 'meals', 'foods', 'recipes', 'plan', 'shopping']);
-export const EVERYDAY_WRITES = Object.freeze(['meal', 'correct', 'health', 'photo_stage', 'photo_confirm', 'photo_discard', 'recipe_save', 'plan_set', 'plan_remove', 'plan_log', 'food_add']);
+export const EVERYDAY_READS = Object.freeze(['summary', 'meals', 'foods', 'recipes', 'plan', 'shopping', 'pantry', 'meds', 'workouts']);
+export const EVERYDAY_WRITES = Object.freeze(['meal', 'correct', 'health', 'photo_stage', 'photo_confirm', 'photo_discard', 'recipe_save', 'plan_set', 'plan_remove', 'plan_log', 'food_add', 'pantry', 'med']);
 export const EVERYDAY_PERIODS = Object.freeze(['today', '7d', '30d']);
 
 import { createHash } from 'node:crypto';
@@ -23,7 +23,7 @@ const slot = value => typeof value === 'string' ? (SLOT_ALIASES[value.trim().toL
 // A write without requestId gets one from its own content: the same call retried is the same request,
 // so the engine's idempotency still holds; a different call is a different request.
 function withRequestId(memberId, operation, args) {
-  if (args.requestId || !['meal','correct','photo_stage','photo_confirm','plan_log','recipe_save'].includes(operation)) return args;
+  if (args.requestId || !['meal','correct','photo_stage','photo_confirm','plan_log','recipe_save','pantry','med'].includes(operation)) return args;
   const digest = createHash('sha256').update(JSON.stringify([memberId ?? null, operation, args])).digest('hex').slice(0, 24);
   return {...args, requestId: `auto-${operation}-${digest}`};
 }
@@ -33,7 +33,7 @@ export function createEverydayInterface(compact) {
     throw new Error('existing compact nutrition engine adapter required');
   }
 
-  async function query({view='summary',memberId,period='today',focus='daily',date,queries,limit=5,query:term='',recipeId,fromDate,toDate,includeLogged=false}={}) {
+  async function query({view='summary',memberId,period='today',focus='daily',date,queries,limit=5,query:term='',recipeId,fromDate,toDate,includeLogged=false,includeGone=false,days=14}={}) {
     if (!EVERYDAY_READS.includes(view)) throw new Error('Unsupported everyday read; use MCP_TOOL_SURFACE=compact for advanced reads');
     if (view === 'summary') {
       if (!EVERYDAY_PERIODS.includes(period)) throw new Error('period must be today, 7d or 30d');
@@ -49,6 +49,9 @@ export function createEverydayInterface(compact) {
       if (period !== 'today') throw new Error('Use a specific date for meals, or summary for a 7/30 day report');
       return compact.query({view:'meals',memberId,date});
     }
+    if (view === 'pantry') return compact.query({view:'pantry',includeGone});
+    if (view === 'meds') return compact.query({view:'meds',memberId});
+    if (view === 'workouts') return compact.query({view:'workouts',memberId,days});
     if (view === 'recipes') {
       return compact.query({view:'recipes',memberId,recipeId,query:term,limit});
     }
@@ -93,6 +96,17 @@ export function createEverydayInterface(compact) {
       }
       if (!args.foodName) throw new Error('Correction requires mealId or foodName');
       return compact.execute({memberId,operation:'recent_correction',args,includeContext});
+    }
+    if (operation === 'pantry') {
+      // The fridge: add (receipt/sentence), use (cooking; remaining in the owner's words), discard, edit.
+      const map = {add:'pantry_add', use:'pantry_use', discard:'pantry_discard', edit:'pantry_edit'};
+      const {action, ...rest} = args;
+      if (!Object.hasOwn(map, action)) throw new Error('pantry action must be add, use, discard or edit');
+      return compact.execute({memberId,operation:map[action],args:rest,includeContext:false});
+    }
+    if (operation === 'med') {
+      // The medicine cabinet: what is at home and the gap between doses. Doses taken come from statebar.
+      return compact.execute({memberId,operation:'med_save',args,includeContext:false});
     }
     if (operation === 'health') {
       // Household clinical/symptom observations remain specialist facts,

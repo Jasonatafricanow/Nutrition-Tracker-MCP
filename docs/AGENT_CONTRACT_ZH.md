@@ -19,6 +19,9 @@
 | `recipes` | 查已存菜谱及每份营养 | `query?` 或 `recipeId`（单个菜谱含原料、步骤） |
 | `plan` | 看膳食计划与目标差额 | `fromDate?`、`toDate?`（≤14 天）；返回每餐菜谱、目标、已记摄入、计划合计、差额 |
 | `shopping` | 由计划生成采购清单 | `fromDate?`、`toDate?`、`includeLogged?`；按食材条目合并，熟重条目需换算生重 |
+| `pantry` | 冰箱里现在有什么、什么快过期 | `includeGone?`；按到期先后排，带 `expired`、`expiringSoon`（2 天内）；推荐菜和采购清单前先看 |
+| `meds` | 家里药箱、每人上次吃药和下次能吃的时间 | `memberId?`；间隔和上限按药箱登记算，不是医嘱 |
+| `workouts` | 每人这周练了几次、多少分钟、最近做了什么 | `memberId?`、`days?`；运动只来自你说过的话（状态块 → statebar 核对） |
 
 示例（指定家庭成员时须有已知 `memberId`）：
 
@@ -45,6 +48,8 @@ nutrition_query({view:"foods",memberId:"adult_a",queries:["熟米饭","鸡胸肉
 | `plan_set` | 把菜谱排进某天某餐 | `date`、`mealSlot`、`recipeId`、`servings`、`replace?`；可排未来日期，不入账 |
 | `plan_remove` | 删除一条未入账计划项 | `entryId`；不影响账本 |
 | `food_add` | 库里确实没有的食材 | `name`、`aliases?`、`state`（raw/cooked/as_sold）、每100g `p/c/f`、`dataSource`、`requestId`；服务端先查近似条目，有候选就拒绝并返回；逐一核对后带 `reviewedCandidateIds`+`confirmDistinct:true` 才新增；每日上限 10 条 |
+| `pantry` | 冰箱：买了什么（小票或口述）、做菜用了、扔了、改一条 | `action`=add/use/discard/edit；add 带 `items:[{name,quantity,shelfLifeDays?|expiresOn?}]`、`source`；use 带 `name`/`itemId` 和 `remaining`（原话，空=用完）。数量照说的记，不求精确 |
+| `med` | 家里药箱登记一种药 | `name`、`aliases?`、`forMembers?`、`dose`、`minIntervalHours?`、`maxPerDay?`；**吃了药不在这里写**，经状态块进 statebar |
 | `plan_log` | 用户说吃了计划里的一餐 | `entryId`、`requestId`、`servings?`（实际份数）；按每份克数拆原料入账，未来日期拒绝 |
 
 文字估算：

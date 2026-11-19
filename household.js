@@ -5,6 +5,7 @@
  */
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync } from 'node:fs';
+import { createHomeStock } from './home-stock.js';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -58,6 +59,8 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
       member_id TEXT NOT NULL, signal TEXT NOT NULL, last_date TEXT NOT NULL,
       PRIMARY KEY(member_id, signal)
     );`);
+  // The fridge and the medicine cabinet belong to the household, not to one member's ledger.
+  const stock=createHomeStock({database,now,timeZone:config.timeZone??'Asia/Shanghai'});
   const engines=new Map(primary?[[primary,primaryEngine]]:[]);
   const member=id=>{const m=byId.get(id);if(!m)throw Error('unknown memberId');return m;};
   const memberEngine=id=>{
@@ -158,6 +161,6 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
     database.prepare('INSERT INTO mentions VALUES(?,?,?) ON CONFLICT(member_id,signal) DO UPDATE SET last_date=excluded.last_date').run(memberId,signal,day);
     return {ok:true,memberId,signal,lastMentioned:day};
   };
-  return {members,primary,member,memberTool,logObservation,observations,context,acknowledge,
+  return {members,primary,member,memberTool,logObservation,observations,context,acknowledge,stock,
     close(){for(const [id,e] of engines)if(id!==primary)e.close();database.close();}};
 }

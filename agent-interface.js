@@ -49,7 +49,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      if(focus==='all')base.dataQuality=m.dataQuality;
      return base;
    })});
- async function query({view='household',memberId,focus='daily',date,days=14,queries=[],query:term='',barcode,limit=5,draftId,domain='daily',source='local',recipeId,fromDate,toDate,includeLogged=false}={}){
+ async function query({view='household',memberId,focus='daily',date,days=14,queries=[],query:term='',barcode,limit=5,draftId,domain='daily',source='local',recipeId,fromDate,toDate,includeLogged=false,includeGone=false}={}){
    if(view==='capabilities'){
      if(!(domain in READ_GROUPS))throw Error('unknown capabilities domain');
      return {ok:true,domain,available:READ_GROUPS[domain],writeOperations:Object.keys(OPERATIONS),
@@ -65,6 +65,18 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      }
      if(view==='member'&&!memberId)throw Error('memberId required for member view');
      return projectHousehold(household.context({days,...(memberId?{memberId}:{})}),focus);
+   }
+   if(view==='pantry'){
+     if(!household)throw Error('pantry requires household mode');
+     return household.stock.pantry({includeGone:!!includeGone});
+   }
+   if(view==='workouts'){
+     if(!household)throw Error('workouts requires household mode');
+     return household.stock.workouts({memberId,days});
+   }
+   if(view==='meds'){
+     if(!household)throw Error('meds requires household mode');
+     return household.stock.meds({memberId});
    }
    if(view==='health_history'){
      if(!household)throw Error('health_history requires household mode');
@@ -148,6 +160,12 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      if(!household)throw Error('health_observation requires household mode');
      if(!memberId)throw Error('memberId required');
      return afterWrite(household.logObservation({memberId,...args}));
+   }
+   // Household stock (fridge, medicine cabinet): shared, not a member's ledger.
+   const STOCK={pantry_add:'pantryAdd',pantry_use:'pantryUse',pantry_discard:'pantryDiscard',pantry_edit:'pantryEdit',med_save:'medSave'};
+   if(Object.hasOwn(STOCK,operation)){
+     if(!household)throw Error(operation+' requires household mode');
+     return household.stock[STOCK[operation]](args);
    }
    if(operation==='acknowledge'){
      if(!household)throw Error('acknowledge requires household mode');

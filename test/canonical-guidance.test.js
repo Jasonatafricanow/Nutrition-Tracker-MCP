@@ -17,8 +17,8 @@ test('one canonical everyday contract is linked by active setup and deployment d
    assert.ok(guide.includes(String.fromCharCode(96)+operation+String.fromCharCode(96)),
              'missing canonical operation '+operation);
  }
- assert.deepEqual(EVERYDAY_READS,['summary','meals','foods','recipes','plan','shopping']);
- assert.deepEqual(EVERYDAY_WRITES,['meal','correct','health','photo_stage','photo_confirm','photo_discard','recipe_save','plan_set','plan_remove','plan_log','food_add']);
+ assert.deepEqual(EVERYDAY_READS,['summary','meals','foods','recipes','plan','shopping','pantry','meds','workouts']);
+ assert.deepEqual(EVERYDAY_WRITES,['meal','correct','health','photo_stage','photo_confirm','photo_discard','recipe_save','plan_set','plan_remove','plan_log','food_add','pantry','med']);
  assert.ok(readme.includes('docs/AGENT_CONTRACT_ZH.md'));
  for(const [name,content] of [['install',install],['remote',remote],['family',family],['photo',photo]]){
    assert.ok(content.includes('AGENT_CONTRACT_ZH.md'),name+' must link canonical contract');
@@ -37,6 +37,6 @@ test('historical tool walkthroughs are explicitly non-normative', ()=>{
    assert.match(file(doc),/HISTORICAL REFERENCE|历史设计记录/,doc);
  }
  const prompt=file('everyday-agent-workflow.js');
- assert.ok(prompt.includes('SIX read intents and ELEVEN write intents'));
+ assert.ok(prompt.includes('NINE read intents and THIRTEEN write intents'));
  assert.ok(!prompt.includes('switch the deployment profile'));
 });

@@ -2,7 +2,7 @@
  * Other capabilities are intentionally absent from ordinary Agent tool discovery.
  */
 export const EVERYDAY_AGENT_WORKFLOW = [
- 'Nutrition Tracker everyday contract: TWO MCP tools with SIX read intents and ELEVEN write intents.',
+ 'Nutrition Tracker everyday contract: TWO MCP tools with NINE read intents and THIRTEEN write intents.',
  'The Agent handles dialog understanding and source-aware estimates; Nutrition stores validated records and audit.',
  'READ: nutrition_query(view="summary",memberId?,period="today"|"7d"|"30d",focus="daily"|"food"|"health").',
  'READ: nutrition_query(view="meals",memberId?,date?) to locate an existing record before a nonrecent correction.',
@@ -29,6 +29,12 @@ export const EVERYDAY_AGENT_WORKFLOW = [
  'READ: nutrition_query(view="shopping",fromDate?,toDate?) merges ingredients of unlogged plan entries by food; libraryWeightIsCooked items need raw-weight conversion before buying.',
  'WRITE: nutrition_execute(operation="plan_log",args={entryId,requestId,servings?}) books ONE plan entry split into ingredients, only when the user says they ate it (servings = what they actually ate). Never log plans in advance or in bulk.',
  'WRITE: nutrition_execute(operation="food_add",args={name,aliases?,state:"raw"|"cooked"|"as_sold",p,c,f,dataSource,requestId}) — only after view="foods" found nothing. The server re-checks similar names/synonyms: if it returns candidates, use an existing foodId when it is the same food; only if every candidate is a different food or state, resubmit with reviewedCandidateIds (all of them), confirmDistinct:true and a new requestId. Values per 100g from a real source; never invent. Daily cap applies.',
+ 'FRIDGE: nutrition_query(view="pantry") lists what is in stock, soonest to expire first, with expired/expiringSoon. Use it before suggesting dishes or a shopping list.',
+ 'WRITE: nutrition_execute(operation="pantry",args={action:"add",source:"receipt"|"text",items:[{name,quantity,shelfLifeDays?}]}) when the user shows a receipt or says what they bought. Quantity is whatever was said ("600g", "4根"); never ask for precision. Give shelfLifeDays only if you know better than a common guess.',
+ '  action:"use" with name and remaining (in the user words, empty = used up) when they cook with something; "discard" when thrown away; "edit" to fix name/quantity/expiresOn.',
+ 'MEDICINE: nutrition_query(view="meds",memberId?) shows the household cabinet and, per member, the last dose and when the next one is allowed. Say it plainly; it is not medical advice.',
+ 'EXERCISE: nutrition_query(view="workouts",memberId?,days?) shows sessions and minutes this week and recent workouts. A workout DONE is reported in the state block, never written here.',
+ 'WRITE: nutrition_execute(operation="med",args={name,aliases?,forMembers?,dose,minIntervalHours?,maxPerDay?}) adds or updates a medicine in the cabinet. A dose TAKEN is reported in the state block, never written here.',
  'For professional nutrition editing, exports or barcode, explain that these are outside the everyday API. Do not guess hidden operations or change deployment settings yourself; an administrator may separately opt into the compatibility or professional surface.',
  'Household memberId is attribution within a trusted family deployment, NOT an access credential. Never leak unrelated member records.',
  'Short write responses already contain updated context; do not query again without a reason.'
