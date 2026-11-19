@@ -237,7 +237,7 @@
 
     <!-- 家庭概览：只读，不替代各人的 Agent 交互 -->
     <section id="household-panel" class="reveal hidden" style="margin:20px 0 28px">
-      <div class="sec-head"><h2>家庭今日概览</h2><span class="aside">数据来自家庭 NAS · 仅供观察</span></div>
+      <div class="sec-head"><h2>家庭概览</h2><span class="aside">数据来自家庭 NAS · 仅供观察</span></div>
       <div id="household-cards" class="household-cards"></div>
     </section>
 
@@ -771,7 +771,23 @@
       if(!Number.isFinite(weightGrams)||weightGrams<=0||weightGrams>5000)return toast('请输入有效克重');
       const requestId='family-ui-edit-'+Date.now()+'-'+Math.random().toString(36).slice(2);
       const result=await dispatch('update_meal_item',{mealId,expectedRevision,requestId,weightGrams,portionSource:'user_estimate'},memberId);
-      if(result?.ok){await loadHouseholdMeals(memberId);toast('已更正，保留历史');}
+      if(result?.ok){await loadHouseholdMeals(memberId);await refreshHousehold();toast('已更正，保留历史');}
+    }
+    // Family members are record-only: show the last 7 days so they can be looked back on.
+    const md=d=>d?d.slice(5):'';
+    function familyCard(m){
+      const x=m.latest, fields=[];
+      fields.push(['睡眠',x.lastSleep?`${x.lastSleep.hours}h（${md(x.lastSleep.date)}）`:'暂无记录']);
+      if(x.bloodPressure)fields.push(['血压',`${x.bloodPressure.systolic}/${x.bloodPressure.diastolic}（${md(x.bloodPressure.date)}）`]);
+      if(x.temperatureC)fields.push(['体温',`${x.temperatureC.value}°C（${md(x.temperatureC.date)}）`]);
+      if(x.weightKg!=null)fields.push(['体重',`${x.weightKg} kg（${md(x.weightDate)}）`]);
+      const days=m.recentMeals||[];
+      const log=days.length?days.map(d=>`<div style="margin:6px 0"><b>${esc(md(d.date))}</b> `+
+        d.slots.map(s=>`${esc(s.slot)}：`+s.items.map(i=>`${esc(i.name)} <button type="button" class="linkbtn" title="点击更正克重" onclick="editHouseholdMeal('${esc(m.memberId)}','${esc(i.id)}',${i.revision},${i.weightG})">${i.weightG}g</button>`).join('、')).join('；')+
+        `</div>`).join(''):'近 7 天暂无餐食记录';
+      return `<article class="household-card"><h3>${esc(m.name)} <small>日常观察</small></h3>
+        <div class="mini">${fields.map(([a,b])=>`<div><span>${esc(a)}</span> ${esc(b)}</div>`).join('')}</div>
+        <div class="small" style="margin-top:10px"><span class="muted">近 7 天吃了什么</span>${log}</div></article>`;
     }
     async function refreshHousehold() {
       try {
@@ -781,6 +797,7 @@
         const data=await res.json();
         $('household-panel').classList.remove('hidden');
         $('household-cards').innerHTML=data.members.map(m=>{
+          if(m.mode==='general')return familyCard(m);
           const x=m.latest, n=m.nutrition;
           const fields=[['睡眠',x.sleepHours==null?'—':x.sleepHours+'h'],
             ['静息心率',x.restingHeartRate==null?'—':x.restingHeartRate+' bpm'],

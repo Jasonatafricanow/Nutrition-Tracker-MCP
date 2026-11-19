@@ -75,3 +75,23 @@ test('webhook sleep still passes the sleep gate in household mode, for owner and
   assert.equal(family.members.find(m=>m.memberId==='kid').latest.sleepHours,9.5);
  }finally{proc.kill();f.close();}
 });
+
+test('family members show the last 7 days of meals and their latest sleep with its date',()=>{
+ const f=fixture();
+ const engine=createEngine(path.join(f.dir,'nutrition.db'),{timeZone:'Asia/Shanghai'});
+ const family=createHousehold({configPath:f.cfg,dir:path.join(f.dir,'household'),engineFactory:createEngine,primaryEngine:engine});
+ try{
+  const day=n=>new Date(Date.now()+n*864e5).toLocaleDateString('en-CA',{timeZone:'Asia/Shanghai'});
+  family.memberTool('kid','log_meal_items',{date:day(-1),mealSlot:'晚餐',requestId:'kid-y',items:[{foodId:'f7',weightGrams:100}]});
+  family.memberTool('kid','log_meal_items',{date:day(-9),mealSlot:'午餐',requestId:'kid-old',items:[{foodId:'f7',weightGrams:80}]});
+  family.memberTool('kid','log_morning_checkin',{sleepHours:9.5,measuredAt:new Date(Date.now()-3*864e5).toISOString()},'HEALTH_WEBHOOK');
+  const c=family.context();
+  const kid=c.members.find(m=>m.memberId==='kid'),owner=c.members.find(m=>m.memberId==='owner');
+  assert.deepEqual(kid.recentMeals.map(d=>d.date),[day(-1)]);            // older than 7 days is left out
+  assert.equal(kid.recentMeals[0].slots[0].slot,'晚餐');
+  assert.equal(kid.recentMeals[0].slots[0].items[0].weightG,100);
+  assert.deepEqual(kid.latest.lastSleep,{hours:9.5,date:day(-3)});
+  assert.equal(kid.latest.sleepHours,null);                               // "recent" (today/yesterday) is unchanged
+  assert.equal(owner.recentMeals,null);                                   // the owner's card is unchanged
+ }finally{family.close();engine.close();f.close();}
+});

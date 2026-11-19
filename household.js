@@ -121,13 +121,22 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
         const previous=database.prepare('SELECT last_date FROM mentions WHERE member_id=? AND signal=?').get(m.id,s.key)?.last_date;
         return !previous||previous<shiftDay(snapshot.date,-2);
       });
-      return {memberId:m.id,name:m.name,mode:m.mode,asOf:snapshot.date,
+      // Family members (general mode) are record-only: the Dashboard shows what they ate over the
+      // last week so it can be looked back on, not just today. Days without meals are left out.
+      const recentMeals=m.mode==='general'?Array.from({length:7},(_,i)=>shiftDay(snapshot.date,-i))
+        .map(date=>({date,meals:memberTool(m.id,'get_meal_history',{date}).meals}))
+        .filter(d=>d.meals.length)
+        .map(d=>({date:d.date,slots:[...new Set(d.meals.map(x=>x.slot))].map(slot=>({slot,
+          items:d.meals.filter(x=>x.slot===slot).map(x=>({id:x.id,name:x.name,weightG:x.weight_g,revision:x.revision??0}))}))})):null;
+      const lastSleep=latestWith('sleep_hours');
+      return {memberId:m.id,name:m.name,mode:m.mode,asOf:snapshot.date,recentMeals,
         nutrition:m.mode==='performance'?{carbLevel:today.carb_level,training:!!today.is_training_day,
           remaining:{kcal:Math.round(snapshot.targets.kcal-today.intake_kcal),p:Math.round(snapshot.targets.p-today.p_g),c:Math.round(snapshot.targets.c-today.c_g),f:Math.round(snapshot.targets.f-today.f_g)},
           targets:snapshot.targets}:null,
         latest:{weightKg:latestWith('scale_weight_kg')?.scale_weight_kg??null,weightDate:latestWith('scale_weight_kg')?.date??null,
           weightTrendKg:snapshot.profile.ewma_weight_kg??null,
           sleepHours:recentSleep?.sleep_hours??null,sleepDate:recentSleep?.date??null,
+          lastSleep:lastSleep?{hours:lastSleep.sleep_hours,date:lastSleep.date}:null,
           deepSleepPct:latestWith('deep_sleep_pct')?.deep_sleep_pct??null,deepSleepDate:latestWith('deep_sleep_pct')?.date??null,restingHeartRate:recentRhr?.rhr_bpm??null,restingHeartRateDate:recentRhr?.date??null,
           hrvMs:latestWith('hrv_ms')?.hrv_ms??null,hrvMetric:latestWith('hrv_ms')?.hrv_metric??null,hrvDate:latestWith('hrv_ms')?.date??null,
           steps:latestWith('steps')?.steps??null,stepsDate:latestWith('steps')?.date??null,activeKcal:latestWith('active_kcal')?.active_kcal??null,activeKcalDate:latestWith('active_kcal')?.date??null,
