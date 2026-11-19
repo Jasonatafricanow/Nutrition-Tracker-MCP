@@ -2,7 +2,7 @@
  * Other capabilities are intentionally absent from ordinary Agent tool discovery.
  */
 export const EVERYDAY_AGENT_WORKFLOW = [
- 'Nutrition Tracker everyday contract: TWO MCP tools with THREE read intents and FIVE write intents.',
+ 'Nutrition Tracker everyday contract: TWO MCP tools with SIX read intents and ELEVEN write intents.',
  'The Agent handles dialog understanding and source-aware estimates; Nutrition stores validated records and audit.',
  'READ: nutrition_query(view="summary",memberId?,period="today"|"7d"|"30d",focus="daily"|"food"|"health").',
  'READ: nutrition_query(view="meals",memberId?,date?) to locate an existing record before a nonrecent correction.',
@@ -12,14 +12,24 @@ export const EVERYDAY_AGENT_WORKFLOW = [
  '  For text descriptions: complete in one user turn when safe; estimates stay labeled as estimates. Never invent foodIds or measured nutrients.',
  '  Images MUST NOT enter the text/measured meal route. For images use the existing estimate_meal_photo MCP Prompt, stage a source-backed photo estimate, then show ONE concise food/portion preview.',
  'WRITE: nutrition_execute(operation="photo_stage",args={mealSlot,estimate,matches?}) saves ONLY a draft.',
+ '  An open draft should stay as a placeholder reminder until the user confirms it or clearly asks to dismiss that specific draft.',
  '  After clear user approval, call nutrition_execute(operation="photo_confirm",args={draftId,confirmed:true,confirmationEvidence,requestId,decisions}).',
  '  No photo log before approval; do not ask the user to approve each individual JSON candidate. Incorrect identity deserves clarification.',
+ 'WRITE: nutrition_execute(operation="photo_discard",args={draftId}) closes only that unconfirmed draft. It does not book the ledger and cannot delete already booked meals.',
+ '  Call photo_discard only when the user clearly wants to dismiss, cancel, or ignore that specified draft. Never auto-discard, never discard in bulk, and never close a draft just to clear a reminder.',
  'WRITE: nutrition_execute(operation="correct",args={foodName,weightGrams,requestId}) corrects an unambiguous recent item.',
  '  For known older records use args={mealId,expectedRevision,weightGrams,requestId}; on ambiguity, locate via meals and ask only about material uncertainty.',
  'WRITE: nutrition_execute(operation="health",args={sleepHours?,scaleWeightKg?,rhrBpm?,...}) for user stated measures; kind-based household observations are supported but are not diagnoses.',
  '  Device batches continue through the authenticated health webhook, not through chat tool loops.',
  'No automatic TDEE recalibration, training-plan changes, supplement advice or whole-day completeness claims from a single recorded meal.',
- 'For professional nutrition editing, exports, barcode or recipe management, explain that these are outside the everyday API. Do not guess hidden operations or change deployment settings yourself; an administrator may separately opt into the compatibility or professional surface.',
+ 'RECIPES & PLANS: nutrition_query(view="recipes",query?|recipeId?) lists saved recipes with per-serving kcal/P/C/F.',
+ 'WRITE: nutrition_execute(operation="recipe_save",args={name,servings,items:[{foodId,weightGrams}],steps?,note?,requestId?}) — weightGrams is the WHOLE batch; foodIds must come from view="foods". Give recipeId to replace a recipe. Gram amounts you suggest are assumptions; say so.',
+ 'WRITE: nutrition_execute(operation="plan_set",args={date,mealSlot,recipeId,servings,replace?}) schedules a recipe (future dates allowed). plan_remove args={entryId} drops an unlogged entry.',
+ 'READ: nutrition_query(view="plan",fromDate?,toDate?) (≤14 days) shows entries, target, logged intake, projected total and gap; use the gap to adjust servings or swap recipes, and adjust today around what is already logged.',
+ 'READ: nutrition_query(view="shopping",fromDate?,toDate?) merges ingredients of unlogged plan entries by food; libraryWeightIsCooked items need raw-weight conversion before buying.',
+ 'WRITE: nutrition_execute(operation="plan_log",args={entryId,requestId,servings?}) books ONE plan entry split into ingredients, only when the user says they ate it (servings = what they actually ate). Never log plans in advance or in bulk.',
+ 'WRITE: nutrition_execute(operation="food_add",args={name,aliases?,state:"raw"|"cooked"|"as_sold",p,c,f,dataSource,requestId}) — only after view="foods" found nothing. The server re-checks similar names/synonyms: if it returns candidates, use an existing foodId when it is the same food; only if every candidate is a different food or state, resubmit with reviewedCandidateIds (all of them), confirmDistinct:true and a new requestId. Values per 100g from a real source; never invent. Daily cap applies.',
+ 'For professional nutrition editing, exports or barcode, explain that these are outside the everyday API. Do not guess hidden operations or change deployment settings yourself; an administrator may separately opt into the compatibility or professional surface.',
  'Household memberId is attribution within a trusted family deployment, NOT an access credential. Never leak unrelated member records.',
  'Short write responses already contain updated context; do not query again without a reason.'
 ].join('\n');

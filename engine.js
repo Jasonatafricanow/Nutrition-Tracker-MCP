@@ -387,6 +387,71 @@ export const TOOL_DEFS = {
       f: z.number().min(0).max(100).describe("脂肪 g/100g")
     }
   },
+  save_recipe: {
+    description: "新建或修改菜谱：名称、份数、整锅原料（必须是食材库 foodId + 克数），可选做法步骤。按食材库自动算每份热量/三大营养素。给 recipeId 时整体替换原料。",
+    shape: {
+      recipeId: z.string().min(1).optional().describe("修改已有菜谱时给出；不填为新建"),
+      name: z.string().trim().min(1).max(80),
+      servings: z.number().positive().max(50).describe("整份原料做出几份"),
+      items: z.array(z.object({
+        foodId: z.string().min(1).describe("食材库实际查得的 ID"),
+        weightGrams: z.number().positive().max(10000).describe("整锅用量（克），不是每份"),
+        name: z.string().trim().max(120).optional().describe("可选显示名，默认用食材库名称")
+      }).passthrough()).min(1).max(40),
+      steps: z.array(z.string().trim().min(1).max(500)).max(30).optional(),
+      note: z.string().trim().max(500).optional(),
+      requestId: z.string().trim().min(1).max(128).optional()
+    }
+  },
+  list_recipes: {
+    description: "按名称查菜谱，返回份数、每份营养；给 recipeId 时返回单个菜谱完整原料与步骤。",
+    shape: { recipeId: z.string().min(1).optional(), query: z.string().max(100).default(""), limit: z.number().int().min(1).max(30).default(10) }
+  },
+  set_meal_plan: {
+    description: "把菜谱排进某天某餐（可排未来日期），servings 为这一餐吃几份。replace=true 时先清掉该天该餐未入账的计划项。",
+    shape: {
+      date: calendarDate,
+      mealSlot: z.enum(MEAL_SLOTS),
+      recipeId: z.string().min(1),
+      servings: z.number().positive().max(10).default(1),
+      replace: z.boolean().default(false),
+      note: z.string().trim().max(200).optional(),
+      requestId: z.string().trim().min(1).max(128).optional()
+    }
+  },
+  remove_plan_entry: {
+    description: "删除一条尚未入账的计划项；不影响账本。",
+    shape: { entryId: z.string().min(1) }
+  },
+  get_meal_plan: {
+    description: "读取日期区间（最多 14 天）的膳食计划：每餐菜谱与营养、每天计划合计、目标与已记录摄入的差额。",
+    shape: { fromDate: calendarDate.optional(), toDate: calendarDate.optional() }
+  },
+  get_shopping_list: {
+    description: "把日期区间（最多 14 天）内未入账计划项的原料按食材库条目合并成采购清单。",
+    shape: { fromDate: calendarDate.optional(), toDate: calendarDate.optional(), includeLogged: z.boolean().default(false) }
+  },
+  log_plan_entry: {
+    description: "把一条计划项按每份克数拆原料记入账本（复用记账事务与幂等），可用 servings 覆盖实际吃的份数。不能记未来日期。",
+    shape: {
+      entryId: z.string().min(1),
+      servings: z.number().positive().max(10).optional().describe("实际吃了几份；不填按计划份数"),
+      requestId: z.string().trim().min(1).max(128)
+    }
+  },
+  add_checked_food: {
+    description: "受控新增食材：服务端先按名称/别名/同义词查重，有近似条目就不新增并返回候选；只有逐一看过候选并声明都不是同一种食材才允许新增。必须给每100g营养、数据来源、生/熟状态。每天新增有上限，写审计。",
+    shape: {
+      name: z.string().trim().min(1).max(40).describe("食材名，不含来源；如 番茄"),
+      aliases: z.array(z.string().trim().min(1).max(20)).max(6).default([]).describe("别名，如 西红柿"),
+      state: z.enum(["raw", "cooked", "as_sold"]).describe("营养数值对应 生重 / 熟重 / 按售卖形态（包装食品、整只点心等）"),
+      p: z.number().min(0).max(100), c: z.number().min(0).max(100), f: z.number().min(0).max(100),
+      source: z.string().trim().min(4).max(200).describe("数据来源，如 中国食物成分表 / USDA FDC 编号 / 包装营养成分表"),
+      reviewedCandidateIds: z.array(z.string().min(1)).max(20).default([]).describe("已看过的查重候选 foodId"),
+      confirmDistinct: z.boolean().default(false).describe("声明候选都不是同一种食材"),
+      requestId: z.string().trim().min(1).max(128)
+    }
+  },
   update_supplement_stack: {
     description: "打卡今日补剂，或修改今日剂量说明",
     shape: {
@@ -398,6 +463,57 @@ export const TOOL_DEFS = {
 };
 
 export class ToolError extends Error {}
+export const FOOD_ADD_DAILY_LIMIT = 10;
+
+// ==================== 食材查重（受控新增用） ====================
+// Normalization is deliberately conservative: strip source suffixes, bracket
+// notes and cooking/state modifiers at the edges, then map known synonyms.
+const FOOD_SYNONYMS = [
+  ["番茄", "西红柿"], ["土豆", "马铃薯", "洋芋"], ["红薯", "地瓜", "番薯", "白薯", "紫薯"],
+  ["玉米", "苞米", "包谷"], ["香菜", "芫荽"], ["青椒", "甜椒", "菜椒", "彩椒"],
+  ["卷心菜", "包菜", "圆白菜", "甘蓝", "洋白菜"], ["西葫芦", "茭瓜"], ["黄瓜", "青瓜"],
+  ["小白菜", "青菜", "上海青"], ["绿豆芽", "豆芽"], ["猪肉末", "肉末", "肉馅"],
+  ["白米饭", "米饭"], ["酸奶", "酸牛奶"], ["鸡胸肉", "鸡胸"], ["鸡腿肉", "鸡腿"],
+  ["虾仁", "虾"], ["纯牛奶", "牛奶"], ["猪里脊", "里脊"], ["花生", "落花生"]
+];
+const SYNONYM_OF = new Map(FOOD_SYNONYMS.flatMap((g) => g.map((w) => [w, g[0]])));
+const EDGE_MODIFIERS = ["炖煮熟", "煮熟", "蒸熟", "水煮", "熟重", "生重", "去皮", "均值", "整只", "原味", "特级", "全脂", "新鲜", "生", "熟", "鲜", "炒", "煮", "蒸", "烤", "煎", "炖", "全"];
+function foodVariants(text) {
+  const base = String(text).split("·")[0].replace(/[（(][^）)]*[）)]/g, " ");
+  return [...new Set(base.split(/[\/、,，]|或/).map((part) => {
+    let t = part.replace(/[\s\p{P}\p{S}\d]+/gu, "");
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const m of EDGE_MODIFIERS) {
+        for (const cut of [t.startsWith(m) ? t.slice(m.length) : null, t.endsWith(m) ? t.slice(0, -m.length) : null]) {
+          if (cut != null && cut.length >= 2 && cut !== t) { t = cut; changed = true; }
+        }
+      }
+    }
+    return SYNONYM_OF.get(t) ?? t;
+  }).filter((t) => t.length >= 1))];
+}
+function foodStateOf(name) {
+  if (/熟|水煮|蒸|炖|煮/.test(name)) return "cooked";
+  if (/生重|\(生|（生/.test(name)) return "raw";
+  return "unknown";
+}
+function bigramDice(a, b) {
+  const grams = (s) => new Set(Array.from({ length: Math.max(0, s.length - 1) }, (_, i) => s.slice(i, i + 2)));
+  const x = grams(a), y = grams(b);
+  if (!x.size || !y.size) return 0;
+  let n = 0; for (const g of x) if (y.has(g)) n++;
+  return (2 * n) / (x.size + y.size);
+}
+function compareFoodNames(newVariants, oldVariants) {
+  let best = null;
+  for (const a of newVariants) for (const b of oldVariants) {
+    if (a === b) return "same";
+    const shorter = a.length <= b.length ? a : b, longer = shorter === a ? b : a;
+    if ((shorter.length >= 2 && longer.includes(shorter)) || bigramDice(a, b) >= 0.67) best = "similar";
+  }
+  return best;
+}
 
 // ==================== 4. 引擎 ====================
 export function createEngine(dbPath, { demo = false, now = () => new Date(), timeZone = process.env.NUTRITION_TIME_ZONE || Intl.DateTimeFormat().resolvedOptions().timeZone } = {}) {
@@ -495,6 +611,29 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       position INTEGER NOT NULL, name TEXT NOT NULL, weight_g REAL NOT NULL,
       p REAL NOT NULL, c REAL NOT NULL, f REAL NOT NULL,
       PRIMARY KEY(template_id,position)
+    );
+    CREATE TABLE IF NOT EXISTS recipes (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, servings REAL NOT NULL,
+      steps_json TEXT, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS recipe_items (
+      recipe_id TEXT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL, food_id TEXT NOT NULL REFERENCES foods(id),
+      name TEXT NOT NULL, weight_g REAL NOT NULL,
+      PRIMARY KEY(recipe_id,position)
+    );
+    CREATE TABLE IF NOT EXISTS meal_plan_entries (
+      id TEXT PRIMARY KEY, date TEXT NOT NULL, slot TEXT NOT NULL,
+      recipe_id TEXT NOT NULL REFERENCES recipes(id), servings REAL NOT NULL,
+      note TEXT, created_at TEXT NOT NULL,
+      logged_at TEXT, logged_request_id TEXT, logged_meal_ids_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_meal_plan_date ON meal_plan_entries(date);
+    CREATE TABLE IF NOT EXISTS food_additions (
+      food_id TEXT PRIMARY KEY REFERENCES foods(id), local_date TEXT NOT NULL,
+      actor TEXT NOT NULL, state TEXT NOT NULL, source TEXT NOT NULL,
+      aliases_json TEXT NOT NULL, candidates_json TEXT NOT NULL,
+      request_id TEXT NOT NULL, created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS agent_request_receipts (
       tool_name TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -703,7 +842,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
 
   // Agent writes can be retried by MCP hosts. Receipts and meal rows are committed
   // atomically so transport retries cannot silently double daily calorie intake.
-  function commitMeal({toolName, requestId, payload, date, slot, rows}) {
+  function commitMeal({toolName, requestId, payload, date, slot, rows, beforeCommit, afterInsert}) {
     if (date > today()) throw new ToolError("不能记录未来日期的膳食");
     const payloadHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
     return tx(() => {
@@ -714,15 +853,17 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
           return { ...JSON.parse(receipt.result_json), duplicate: true };
         }
       }
+      beforeCommit?.();
       ensureLedger(date);
-      const ins = q("INSERT INTO meal_logs (id, date, slot, name, weight_g, p, c, f, created_at, source_kind, portion_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      const ins = q("INSERT INTO meal_logs (id, date, slot, name, weight_g, p, c, f, created_at, source_kind, source_ref, portion_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       const ids = [];
       for (const r of rows) {
         if (r.p + r.c + r.f > r.w * 1.001) throw new ToolError("营养素总质量不能超过食物份量");
         const id = "m_" + randomUUID();
-        ins.run(id,date,slot,r.name,r.w,r.p,r.c,r.f,nowIso(),r.sourceKind??null,r.portionSource??null);
+        ins.run(id,date,slot,r.name,r.w,r.p,r.c,r.f,nowIso(),r.sourceKind??null,r.sourceRef??null,r.portionSource??null);
         ids.push(id);
       }
+      afterInsert?.(ids);
       recalcIntake(date); // History edits must also invalidate intake_complete.
       const ledger = getRow(date);
       const result = {ok:true, date, mealSlot:slot, mealIds:ids, items:rows, todayIntakeKcal:ledger.intake_kcal, dayIntakeKcal:ledger.intake_kcal, intakeComplete:false};
@@ -840,6 +981,84 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       reusedEvidence: !!(reusedEvidence || noNewObservation), evidenceHash,
       lastObservationDate:last.date, safeRange: [minSafe, maxSafe], diagnosticNote
     };
+  }
+
+  // ---------- 菜谱与膳食计划 ----------
+  // Recipes reference library foods; nutrition is computed from the current
+  // library at read time and snapshotted into meal_logs only when logged.
+  function withReceipt(toolName, requestId, payload, fn) {
+    const payloadHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+    return tx(() => {
+      if (requestId) {
+        const receipt = q("SELECT * FROM agent_request_receipts WHERE tool_name=? AND request_id=?").get(toolName, requestId);
+        if (receipt) {
+          if (receipt.payload_hash !== payloadHash) throw new ToolError("requestId 已用于不同请求；请生成新的 requestId");
+          return { ...JSON.parse(receipt.result_json), duplicate: true };
+        }
+      }
+      const result = fn();
+      if (requestId) q("INSERT INTO agent_request_receipts (tool_name,request_id,payload_hash,result_json,created_at) VALUES (?,?,?,?,?)")
+        .run(toolName, requestId, payloadHash, JSON.stringify(result), nowIso());
+      return result;
+    });
+  }
+  const macroOf = (p, c, f) => ({ kcal: kcalOf(p, c, f), p: round1(p), c: round1(c), f: round1(f) });
+  function recipeView(id) {
+    const r = q("SELECT * FROM recipes WHERE id=?").get(id);
+    const items = q(`SELECT i.food_id,i.name,i.weight_g,f.p,f.c,f.f FROM recipe_items i JOIN foods f ON f.id=i.food_id
+      WHERE i.recipe_id=? ORDER BY i.position`).all(id);
+    let P = 0, C = 0, F = 0, W = 0;
+    const view = items.map((i) => {
+      const k = i.weight_g / 100; P += i.p * k; C += i.c * k; F += i.f * k; W += i.weight_g;
+      return { foodId: i.food_id, name: i.name, weightGrams: i.weight_g, perServingGrams: round1(i.weight_g / r.servings), ...macroOf(i.p * k, i.c * k, i.f * k) };
+    });
+    const s = r.servings;
+    return { recipeId: r.id, name: r.name, servings: s, note: r.note, steps: r.steps_json ? JSON.parse(r.steps_json) : [],
+      total: { grams: round1(W), ...macroOf(P, C, F) },
+      perServing: { grams: round1(W / s), ...macroOf(P / s, C / s, F / s) },
+      items: view, updatedAt: r.updated_at };
+  }
+  function checkPlanDate(date) {
+    const t = today();
+    if (date < offsetDateStr(t, -30) || date > offsetDateStr(t, 60)) throw new ToolError("计划日期需在今天前 30 天到后 60 天之内");
+  }
+  function planRange(a) {
+    const from = a.fromDate ?? today(), to = a.toDate ?? from;
+    if (to < from) throw new ToolError("toDate 不能早于 fromDate");
+    const n = dayDiff(from, to) + 1;
+    if (n > 14) throw new ToolError("一次最多 14 天");
+    return Array.from({ length: n }, (_, k) => offsetDateStr(from, k));
+  }
+  function targetForDate(date) {
+    const t = today(), schedule = getSchedule(), profile = getProfile();
+    const todayRow = getRow(t), ti = weekdayIndex(t);
+    const week = schedule.map((s, i) => i === ti ? todayRow.carb_level : s.plan);
+    const macro = macroPlan({ adaptiveTdee: profile.adaptive_tdee, goalKcal: profile.goal_kcal,
+      ratioP: profile.ratio_p, ratioC: profile.ratio_c, ratioF: profile.ratio_f }, week);
+    const row = date <= t ? getRow(date) : null;
+    const level = row?.carb_level ?? schedule[weekdayIndex(date)].plan;
+    return { carbLevel: level, basis: row ? "ledger" : "weekly_schedule", ...macro.forLevel(level) };
+  }
+  function planDay(date) {
+    const order = (slot) => MEAL_SLOTS.indexOf(slot);
+    const entries = q("SELECT * FROM meal_plan_entries WHERE date=? ORDER BY created_at,id").all(date)
+      .sort((x, y) => order(x.slot) - order(y.slot)).map((e) => {
+        const r = recipeView(e.recipe_id), k = e.servings;
+        return { entryId: e.id, mealSlot: e.slot, recipeId: r.recipeId, recipeName: r.name, servings: k, note: e.note,
+          status: e.logged_at ? "logged" : "planned", grams: round1(r.perServing.grams * k),
+          ...macroOf(r.perServing.p * k, r.perServing.c * k, r.perServing.f * k) };
+      });
+    const sum = (list) => macroOf(list.reduce((s, e) => s + e.p, 0), list.reduce((s, e) => s + e.c, 0), list.reduce((s, e) => s + e.f, 0));
+    const pending = entries.filter((e) => e.status === "planned");
+    const target = targetForDate(date);
+    const ledger = date <= today() ? getRow(date) : null;
+    const logged = macroOf(ledger?.p_g ?? 0, ledger?.c_g ?? 0, ledger?.f_g ?? 0);
+    const pend = sum(pending);
+    const projected = macroOf(logged.p + pend.p, logged.c + pend.c, logged.f + pend.f);
+    return { date, weekday: DAY_NAMES[weekdayIndex(date)], target, loggedIntake: logged,
+      plannedPending: pend, projected,
+      gap: { kcal: target.kcal - projected.kcal, p: round1(target.p - projected.p), c: round1(target.c - projected.c), f: round1(target.f - projected.f) },
+      entries };
   }
 
   // ---------- 工具实现 ----------
@@ -1009,6 +1228,11 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
     },
 
     log_morning_checkin(a, source = "MCP_AGENT") {
+      // Sleep is evidence that statebar gates first (it checks the user's own words). With
+      // NUTRITION_SLEEP_WEBHOOK_ONLY=1 only the health webhook (statebar sync, devices) may set it.
+      if (process.env.NUTRITION_SLEEP_WEBHOOK_ONLY === "1" && (a.sleepHours != null || a.deepSleepPct != null)
+          && !String(source).startsWith("HEALTH_WEBHOOK"))
+        throw new ToolError("睡眠只接受 statebar 鉴权后的同步，不能由对话直接写入。用户说的睡眠请写进状态块（sleep_episode），由 statebar 核对后同步过来。");
       if (a.hrvMs != null && !a.hrvMetric) throw new ToolError("提供 hrvMs 时必须声明 hrvMetric: SDNN 或 RMSSD");
       if (a.measuredAt && Date.parse(a.measuredAt) > now().getTime() + 5*60_000) throw new ToolError("测量时间不能位于未来");
       const t = a.measuredAt ? localDateStr(new Date(a.measuredAt), timeZone) : today();
@@ -1326,6 +1550,164 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       const id = "custom_" + randomUUID();
       q("INSERT INTO foods (id, name, p, c, f, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, a.name, a.p, a.c, a.f, nowIso());
       return { result: { ok: true, foodId: id }, summary: `食材库新增：${a.name} (每100g P${a.p} C${a.c} F${a.f})` };
+    },
+
+    add_checked_food(a, source) {
+      if (a.p + a.c + a.f > 100.01) throw new ToolError("每 100g 食物的蛋白质、碳水和脂肪合计不能大于 100g");
+      if (kcalOf(a.p, a.c, a.f) > 900) throw new ToolError("每 100g 热量超过 900 kcal，数值不合理");
+      if (/[·]/.test(a.name)) throw new ToolError("name 只写食材名，来源放 source");
+      const actor = process.env.NUTRITION_AGENT_ACTOR || source;
+      const out = withReceipt("add_checked_food", a.requestId, a, () => {
+        const mine = foodVariants([a.name, ...a.aliases].join("/"));
+        if (!mine.length) throw new ToolError("食材名无效");
+        const extraAliases = new Map(q("SELECT food_id,aliases_json,state FROM food_additions").all()
+          .map((r) => [r.food_id, { aliases: JSON.parse(r.aliases_json), state: r.state }]));
+        const candidates = [];
+        let duplicate = null;
+        for (const food of q("SELECT id,name,p,c,f FROM foods").all()) {
+          const meta = extraAliases.get(food.id);
+          const theirs = foodVariants([food.name, ...(meta?.aliases ?? [])].join("/"));
+          const match = compareFoodNames(mine, theirs);
+          if (!match) continue;
+          const state = meta?.state ?? foodStateOf(food.name);
+          const c = { foodId: food.id, name: food.name, p: food.p, c: food.c, f: food.f, state, match };
+          if (match === "same" && (state === a.state || (state === "unknown" && a.state !== "raw" && a.state !== "cooked"))) duplicate = c;
+          candidates.push(c);
+        }
+        if (duplicate) return { ok: false, added: false, reason: "duplicate", existing: duplicate, candidates: candidates.slice(0, 10),
+          instruction: "库里已有同名同状态的条目，直接用这个 foodId，不能再新增。" };
+        const unreviewed = candidates.filter((c) => !a.reviewedCandidateIds.includes(c.foodId));
+        if (candidates.length && (!a.confirmDistinct || unreviewed.length)) {
+          return { ok: false, added: false, reason: "similar_foods_found", candidates: candidates.slice(0, 10),
+            instruction: "先看这些候选：是同一种就直接用它的 foodId。只有确认都不是同一种食材（不同食物或不同生熟状态），才把全部候选 foodId 放进 reviewedCandidateIds 并加 confirmDistinct:true 重新提交（换新 requestId）。" };
+        }
+        const day = today();
+        const used = q("SELECT COUNT(*) AS n FROM food_additions WHERE local_date=? AND actor=?").get(day, actor).n;
+        if (used >= FOOD_ADD_DAILY_LIMIT) throw new ToolError(`今天已新增 ${used} 条食材，达到每日上限 ${FOOD_ADD_DAILY_LIMIT}；明天再加或请管理员处理`);
+        const stateLabel = { raw: "生重", cooked: "熟", as_sold: "按售卖形态" }[a.state];
+        const display = `${a.name}${a.aliases.length ? "/" + a.aliases.join("/") : ""}(${stateLabel}) · ${a.source.slice(0, 40)}`;
+        const id = "custom_" + randomUUID();
+        q("INSERT INTO foods (id, name, p, c, f, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, display, a.p, a.c, a.f, nowIso());
+        q(`INSERT INTO food_additions(food_id,local_date,actor,state,source,aliases_json,candidates_json,request_id,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?)`).run(id, day, actor, a.state, a.source, JSON.stringify(a.aliases),
+          JSON.stringify(candidates.map((c) => c.foodId)), a.requestId, nowIso());
+        journal(actor, "add_checked_food", { foodId: id, ...a }, `受控新增食材：${display} (每100g P${a.p} C${a.c} F${a.f})，复核候选 ${candidates.length} 条`);
+        return { ok: true, added: true, foodId: id, name: display, per100g: { kcal: kcalOf(a.p, a.c, a.f), p: a.p, c: a.c, f: a.f },
+          state: a.state, reviewedCandidates: candidates.map((c) => c.foodId), dailyUsed: used + 1, dailyLimit: FOOD_ADD_DAILY_LIMIT };
+      });
+      return { result: out, summary: null };
+    },
+
+    save_recipe(a) {
+      const foods=a.items.map(it=>{
+        const food=q("SELECT id,name FROM foods WHERE id=?").get(it.foodId);
+        if(!food)throw new ToolError(`食材库没有 ${it.foodId}；先用 foods 查到真实 ID，查不到再请管理员入库`);
+        return {foodId:food.id,name:it.name||food.name,w:round1(it.weightGrams)};
+      });
+      const out=withReceipt("save_recipe",a.requestId,a,()=>{
+        const at=nowIso();
+        let id=a.recipeId;
+        if(id){
+          if(!q("SELECT id FROM recipes WHERE id=?").get(id))throw new ToolError("不存在该菜谱");
+          q("UPDATE recipes SET name=?,servings=?,steps_json=?,note=?,updated_at=? WHERE id=?")
+            .run(a.name,a.servings,a.steps?JSON.stringify(a.steps):null,a.note??null,at,id);
+          q("DELETE FROM recipe_items WHERE recipe_id=?").run(id);
+        }else{
+          id="rcp_"+randomUUID();
+          q("INSERT INTO recipes(id,name,servings,steps_json,note,created_at,updated_at) VALUES (?,?,?,?,?,?,?)")
+            .run(id,a.name,a.servings,a.steps?JSON.stringify(a.steps):null,a.note??null,at,at);
+        }
+        const ins=q("INSERT INTO recipe_items(recipe_id,position,food_id,name,weight_g) VALUES (?,?,?,?,?)");
+        foods.forEach((f,i)=>ins.run(id,i,f.foodId,f.name,f.w));
+        return {ok:true,updated:!!a.recipeId,recipe:recipeView(id)};
+      });
+      return {result:out,summary:out.duplicate?null:`菜谱「${a.name}」${a.recipeId?"已修改":"已保存"}（${a.servings} 份）`};
+    },
+
+    list_recipes(a) {
+      if(a.recipeId){
+        if(!q("SELECT id FROM recipes WHERE id=?").get(a.recipeId))throw new ToolError("不存在该菜谱");
+        return {result:{ok:true,recipe:recipeView(a.recipeId)},summary:null};
+      }
+      const escaped=a.query.trim().replace(/[\\%_]/g,ch=>"\\"+ch);
+      const ids=q("SELECT id FROM recipes WHERE name LIKE ? ESCAPE '\\' ORDER BY updated_at DESC,id LIMIT ?").all(`%${escaped}%`,a.limit);
+      return {result:{ok:true,recipes:ids.map(({id})=>{
+        const r=recipeView(id);
+        return {recipeId:r.recipeId,name:r.name,servings:r.servings,perServing:r.perServing,
+          ingredients:r.items.map(i=>`${i.name} ${i.weightGrams}g`)};
+      })},summary:null};
+    },
+
+    set_meal_plan(a) {
+      checkPlanDate(a.date);
+      const recipe=q("SELECT id,name FROM recipes WHERE id=?").get(a.recipeId);
+      if(!recipe)throw new ToolError("不存在该菜谱");
+      const out=withReceipt("set_meal_plan",a.requestId,a,()=>{
+        let removed=0;
+        if(a.replace)removed=Number(q("DELETE FROM meal_plan_entries WHERE date=? AND slot=? AND logged_at IS NULL").run(a.date,a.mealSlot).changes);
+        const id="plan_"+randomUUID();
+        q("INSERT INTO meal_plan_entries(id,date,slot,recipe_id,servings,note,created_at) VALUES (?,?,?,?,?,?,?)")
+          .run(id,a.date,a.mealSlot,a.recipeId,a.servings,a.note??null,nowIso());
+        return {ok:true,entryId:id,replacedEntries:removed,day:planDay(a.date)};
+      });
+      return {result:out,summary:out.duplicate?null:`计划 ${a.date}【${a.mealSlot}】${recipe.name} × ${a.servings} 份`};
+    },
+
+    remove_plan_entry(a) {
+      const e=q("SELECT * FROM meal_plan_entries WHERE id=?").get(a.entryId);
+      if(!e)throw new ToolError("找不到该计划项");
+      if(e.logged_at)throw new ToolError("该计划项已记入账本；改账本请用纠错，不能删计划来删记录");
+      q("DELETE FROM meal_plan_entries WHERE id=?").run(a.entryId);
+      return {result:{ok:true,entryId:a.entryId,removed:true,day:planDay(e.date)},summary:`删除计划项 ${e.date}【${e.slot}】`};
+    },
+
+    get_meal_plan(a) {
+      const dates=planRange(a);
+      return {result:{ok:true,fromDate:dates[0],toDate:dates.at(-1),days:dates.map(planDay),
+        note:"营养按食材库当前数值与菜谱克数计算，是估计值；目标：今天按当日档位，其余日期按周模板档位。"},summary:null};
+    },
+
+    get_shopping_list(a) {
+      const dates=planRange(a);
+      const rows=q(`SELECT e.id AS entry_id,e.date,e.slot,e.servings AS eat,r.id AS recipe_id,r.name AS recipe_name,r.servings,
+          i.food_id,i.name,i.weight_g,f.name AS food_name
+        FROM meal_plan_entries e JOIN recipes r ON r.id=e.recipe_id JOIN recipe_items i ON i.recipe_id=r.id
+        JOIN foods f ON f.id=i.food_id
+        WHERE e.date BETWEEN ? AND ? ${a.includeLogged?"":"AND e.logged_at IS NULL"} ORDER BY e.date,i.position`).all(dates[0],dates.at(-1));
+      const merged=new Map(), entries=new Set();
+      for(const r of rows){
+        entries.add(r.entry_id);
+        const g=r.weight_g/r.servings*r.eat;
+        const m=merged.get(r.food_id)??{foodId:r.food_id,name:r.food_name,totalGrams:0,usedIn:new Set()};
+        m.totalGrams+=g; m.usedIn.add(r.recipe_name); merged.set(r.food_id,m);
+      }
+      const items=[...merged.values()].map(m=>({foodId:m.foodId,name:m.name,totalGrams:Math.round(m.totalGrams),
+        usedIn:[...m.usedIn],libraryWeightIsCooked:/熟|cooked/i.test(m.name)})).sort((x,y)=>y.totalGrams-x.totalGrams);
+      return {result:{ok:true,fromDate:dates[0],toDate:dates.at(-1),planEntries:entries.size,items,
+        note:"按食材库条目合并；克数是菜谱里写的重量。libraryWeightIsCooked=true 的条目是熟重，采购需按生重换算（如米饭熟重约为生米 2.2–2.5 倍，为估计值）。调味料若未写进菜谱则不在清单内。"},summary:null};
+    },
+
+    log_plan_entry(a) {
+      const e=q("SELECT * FROM meal_plan_entries WHERE id=?").get(a.entryId);
+      if(!e)throw new ToolError("找不到该计划项");
+      if(e.logged_at && e.logged_request_id!==a.requestId)throw new ToolError("该计划项已经记入账本，不能重复入账");
+      const recipe=q("SELECT * FROM recipes WHERE id=?").get(e.recipe_id);
+      const servings=a.servings??e.servings;
+      const items=q(`SELECT i.*,f.p,f.c,f.f FROM recipe_items i JOIN foods f ON f.id=i.food_id WHERE i.recipe_id=? ORDER BY position`).all(recipe.id);
+      if(!items.length)throw new ToolError("菜谱没有原料");
+      const rows=items.map(i=>{
+        const w=round1(i.weight_g/recipe.servings*servings), k=w/100;
+        return {name:i.name,w,p:round1(i.p*k),c:round1(i.c*k),f:round1(i.f*k),
+          sourceKind:"recipe_plan",sourceRef:`${e.id}|${recipe.id}`,portionSource:"recipe_per_serving"};
+      });
+      const result=commitMeal({toolName:"log_plan_entry",requestId:a.requestId,payload:a,date:e.date,slot:e.slot,rows,
+        beforeCommit:()=>{
+          if(q("SELECT logged_at FROM meal_plan_entries WHERE id=?").get(e.id).logged_at)throw new ToolError("该计划项已经记入账本，不能重复入账");
+        },
+        afterInsert:(ids)=>q("UPDATE meal_plan_entries SET logged_at=?,logged_request_id=?,logged_meal_ids_json=? WHERE id=?")
+          .run(nowIso(),a.requestId,JSON.stringify(ids),e.id)});
+      return {result:{...result,entryId:e.id,recipeId:recipe.id,recipeName:recipe.name,servings,estimated:true,editable:true},
+        summary:result.duplicate?null:`按计划记账 ${e.date}【${e.slot}】${recipe.name} × ${servings} 份（拆 ${rows.length} 项原料）`};
     },
 
     update_supplement_stack(a) {

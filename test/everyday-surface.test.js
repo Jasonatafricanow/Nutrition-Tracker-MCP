@@ -30,15 +30,15 @@ function exec(api,operation,args,memberId='b'){
  return api.execute({memberId,operation,args});
 }
 
-test('only 3 read and 5 write intents, no universal backdoor',async()=>{
- assert.deepEqual(EVERYDAY_READS,['summary','meals','foods']);
- assert.deepEqual(EVERYDAY_WRITES,['meal','correct','health','photo_stage','photo_confirm']);
+test('only 3 read and 6 write intents, no universal backdoor',async()=>{
+ assert.deepEqual(EVERYDAY_READS,['summary','meals','foods','recipes','plan','shopping']);
+ assert.deepEqual(EVERYDAY_WRITES,['meal','correct','health','photo_stage','photo_confirm','photo_discard','recipe_save','plan_set','plan_remove','plan_log','food_add']);
  const f=makeFixture();try{
   await assert.rejects(f.api.query({view:'capabilities'}),/Unsupported everyday read/);
   await assert.rejects(f.api.query({view:'barcode',barcode:'0123456789012'}),/Unsupported everyday read/);
   assert.throws(()=>exec(f.api,'advanced',{tool:'delete_meal_item'}),/Unsupported everyday write/);
   assert.throws(()=>exec(f.api,'plan',{carbLevel:'high'}),/Unsupported everyday write/);
-  assert.throws(()=>exec(f.api,'food_add',{name:'New',p:0,c:0,f:0}),/Unsupported everyday write/);
+  assert.throws(()=>exec(f.api,'template_save',{name:'New',mealSlot:'午餐'}),/Unsupported everyday write/);
   assert.throws(()=>exec(f.api,'supplement',{supplementId:'whey',taken:true}),/Unsupported everyday write/);
   assert.throws(()=>exec(f.api,'meal',{mealSlot:'午餐',source:'photo',requestId:'no',items:[]}),/images require photo_stage/);
  }finally{f.close()}
@@ -139,6 +139,51 @@ test('photos still stage before one explicit confirmation, and images cannot use
  }finally{f.close()}
 });
 
+test('photo_discard closes only a specified unconfirmed draft and never books or deletes ledger rows',async()=>{
+ const f=makeFixture();try{
+  const estimate=structuredClone(PHOTO_ESTIMATE_EXAMPLE);
+  const first=exec(f.api,'photo_stage',{mealSlot:'午餐',estimate,
+    matches:[{itemId:'item-1',foodId:'f7'}]});
+  const second=exec(f.api,'photo_stage',{mealSlot:'晚餐',estimate,
+    matches:[{itemId:'item-1',foodId:'f7'}]});
+  assert.notEqual(first.draftId,second.draftId);
+  assert.throws(()=>exec(f.api,'photo_discard',{}),/requires draftId/);
+  assert.throws(()=>exec(f.api,'photo_discard',{draftIds:[first.draftId,second.draftId]}),/one specified draft only/);
+  assert.throws(()=>exec(f.api,'photo_discard',{draftId:[first.draftId,second.draftId]}),/one specified draft only/);
+  assert.throws(()=>exec(f.api,'photo_discard',{draftId:'missing-draft'}),/找不到照片草稿/);
+  const canceled=exec(f.api,'photo_discard',{draftId:first.draftId});
+  assert.equal(canceled.ok,true);
+  assert.equal(canceled.status,'discarded');
+  assert.equal(canceled.draftId,first.draftId);
+  assert.equal((await f.api.query({view:'meals',memberId:'b'})).meals.length,0);
+  assert.equal((await f.api.query({view:'meals',memberId:'a'})).meals.length,0);
+  const again=exec(f.api,'photo_discard',{draftId:first.draftId});
+  assert.equal(again.ok,true);
+  assert.equal(again.status,'discarded');
+  assert.throws(()=>exec(f.api,'photo_confirm',{
+    draftId:first.draftId,confirmed:true,
+    confirmationEvidence:{channel:'user_message',summary:'should not book a discarded draft'},
+    requestId:'discarded-confirm',
+    decisions:[{index:0,include:true,weightGrams:170,portionSource:'visual_estimate'},
+               {index:1,include:false}]
+  }),/已取消/);
+  const kept=exec(f.api,'photo_confirm',{
+    draftId:second.draftId,confirmed:true,
+    confirmationEvidence:{channel:'user_message',summary:'User accepted the remaining draft'},
+    requestId:'kept-photo',
+    decisions:[{index:0,include:true,weightGrams:170,portionSource:'visual_estimate'},
+               {index:1,include:false}]
+  });
+  assert.equal(kept.mealIds.length,1);
+  const ledger=await f.api.query({view:'meals',memberId:'b'});
+  assert.equal(ledger.meals.length,1);
+  assert.equal(ledger.meals[0].source_kind,'agent_photo_confirmed');
+  assert.throws(()=>exec(f.api,'photo_discard',{draftId:second.draftId}),/已入账/);
+  assert.equal((await f.api.query({view:'meals',memberId:'b'})).meals.length,1);
+  assert.equal((await f.api.query({view:'meals',memberId:'b'})).meals[0].id,kept.mealIds[0]);
+ }finally{f.close()}
+});
+
 test('stdio DEFAULT exposes same 2 tools but much smaller enum choices and contract',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'everyday-mcp-'));
  const client=new Client({name:'everyday-surface-probe',version:'1'});
@@ -156,7 +201,12 @@ test('stdio DEFAULT exposes same 2 tools but much smaller enum choices and contr
   assert.deepEqual(write.inputSchema.properties.operation.enum,EVERYDAY_WRITES);
   assert.ok(!JSON.stringify(write.inputSchema).includes('advanced'));
   const guide=await client.getPrompt({name:'nutrition_agent_workflow'});
-  assert.match(guide.messages[0].content.text,/THREE read intents/);
+  assert.match(guide.messages[0].content.text,/SIX read intents and ELEVEN write intents/);
+  assert.match(guide.messages[0].content.text,/photo_discard/);
+  assert.match(guide.messages[0].content.text,/Never auto-discard/);
+  assert.match(write.description,/photo_discard/);
+  assert.match(write.description,/never auto-discard/);
+  assert.equal(write.inputSchema.properties.args.properties.draftId != null, true);
   const result=await client.callTool({name:'nutrition_execute',
     arguments:{operation:'meal',args:{mealSlot:'午餐',requestId:'first-real-write',
       items:[{name:'米饭',weightGrams:140,foodId:'f7'}]}}});

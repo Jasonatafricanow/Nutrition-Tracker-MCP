@@ -1,14 +1,14 @@
 /**
  * Everyday Agent product contract.
  *
- * Exactly three read intents and five write intents. This file is a thin,
+ * Six read intents and eleven write intents (recipes/meal plans added 2026-11-15). This file is a thin,
  * deterministic routing adapter over the existing source-of-truth engine:
  * no new calculator, tables, health inference or photo shortcut.
  *
  * Legacy compact and full interfaces remain selectable for migration.
  */
-export const EVERYDAY_READS = Object.freeze(['summary', 'meals', 'foods']);
-export const EVERYDAY_WRITES = Object.freeze(['meal', 'correct', 'health', 'photo_stage', 'photo_confirm']);
+export const EVERYDAY_READS = Object.freeze(['summary', 'meals', 'foods', 'recipes', 'plan', 'shopping']);
+export const EVERYDAY_WRITES = Object.freeze(['meal', 'correct', 'health', 'photo_stage', 'photo_confirm', 'photo_discard', 'recipe_save', 'plan_set', 'plan_remove', 'plan_log', 'food_add']);
 export const EVERYDAY_PERIODS = Object.freeze(['today', '7d', '30d']);
 
 const own = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
@@ -18,7 +18,7 @@ export function createEverydayInterface(compact) {
     throw new Error('existing compact nutrition engine adapter required');
   }
 
-  async function query({view='summary',memberId,period='today',focus='daily',date,queries,limit=5}={}) {
+  async function query({view='summary',memberId,period='today',focus='daily',date,queries,limit=5,query:term='',recipeId,fromDate,toDate,includeLogged=false}={}) {
     if (!EVERYDAY_READS.includes(view)) throw new Error('Unsupported everyday read; use MCP_TOOL_SURFACE=compact for advanced reads');
     if (view === 'summary') {
       if (!EVERYDAY_PERIODS.includes(period)) throw new Error('period must be today, 7d or 30d');
@@ -33,6 +33,14 @@ export function createEverydayInterface(compact) {
     if (view === 'meals') {
       if (period !== 'today') throw new Error('Use a specific date for meals, or summary for a 7/30 day report');
       return compact.query({view:'meals',memberId,date});
+    }
+    if (view === 'recipes') {
+      return compact.query({view:'recipes',memberId,recipeId,query:term,limit});
+    }
+    if (view === 'plan' || view === 'shopping') {
+      // Planning reads may look ahead; they never write and never claim intake.
+      return compact.query({view:view === 'plan' ? 'meal_plan' : 'shopping_list',memberId,
+        fromDate:fromDate ?? date,toDate,includeLogged});
     }
     if (!Array.isArray(queries) || queries.length < 1 || queries.length > 6) {
       throw new Error('foods requires 1–6 text queries');
@@ -80,9 +88,44 @@ export function createEverydayInterface(compact) {
       // A staged photograph is a DRAFT; no meal ledger write occurs here.
       return compact.execute({memberId,operation:'photo_stage',args,includeContext:false});
     }
-    // No path from image directly to meal/text. Engine verifies explicit
-    // user confirmation evidence and all candidate decisions before write.
-    return compact.execute({memberId,operation:'photo_confirm',args,includeContext});
+    if (operation === 'photo_discard') {
+      // Close only one specified unconfirmed draft. The engine refuses
+      // booked meals, is idempotent for already-discarded drafts, and
+      // never writes or deletes ledger entries.
+      if (own(args,'draftIds') || Array.isArray(args.draftId)) {
+        throw new Error('photo_discard closes one specified draft only');
+      }
+      if (!args.draftId || typeof args.draftId !== 'string') {
+        throw new Error('photo_discard requires draftId');
+      }
+      return compact.execute({memberId,operation:'photo_discard',args:{draftId:args.draftId},includeContext:false});
+    }
+    if (operation === 'recipe_save') {
+      // Ingredients must be real local food IDs; engine computes nutrition.
+      return compact.execute({memberId,operation:'recipe_save',args,includeContext:false});
+    }
+    if (operation === 'plan_set' || operation === 'plan_remove') {
+      return compact.execute({memberId,operation,args,includeContext:false});
+    }
+    if (operation === 'plan_log') {
+      // Books one plan entry through the existing meal transaction, split by
+      // per-serving ingredient grams. Future dates are refused by the engine.
+      if (!args.entryId || !args.requestId) throw new Error('plan_log requires entryId and requestId');
+      return compact.execute({memberId,operation:'plan_log',args,includeContext});
+    }
+    if (operation === 'food_add') {
+      // Guarded library growth: the engine searches for similar foods first and
+      // refuses until every candidate was reviewed and declared distinct.
+      const {dataSource,source:_s,...rest} = args;
+      if (!dataSource) throw new Error('food_add requires dataSource (where the per-100g numbers come from)');
+      return compact.execute({memberId,operation:'food_add_checked',args:{...rest,source:dataSource},includeContext:false});
+    }
+    if (operation === 'photo_confirm') {
+      // No path from image directly to meal/text. Engine verifies explicit
+      // user confirmation evidence and all candidate decisions before write.
+      return compact.execute({memberId,operation:'photo_confirm',args,includeContext});
+    }
+    throw new Error('Unsupported everyday write; use MCP_TOOL_SURFACE=compact for advanced operations');
   }
   return {query,execute};
 }

@@ -207,7 +207,7 @@ function createMcpServer() {
   };
   if (surface==='everyday') {
     mcp.registerTool('nutrition_query', {
-      description:'Everyday nutrition reads. summary = today or observed-data 7d/30d report; meals = a dated meal ledger for review/correction; foods = one batch of 1–6 LOCAL food names. For specialist tools use the opt-in compact/full profile.',
+      description:'Everyday nutrition reads. summary = today or observed-data 7d/30d report; meals = a dated meal ledger for review/correction; foods = one batch of 1–6 LOCAL food names; recipes = saved recipes with per-serving nutrition (recipeId for one); plan = meal plan for fromDate..toDate with targets, logged intake and gap; shopping = merged ingredient list for unlogged plan entries. For specialist tools use the opt-in compact/full profile.',
       inputSchema:{
         view:z.enum(EVERYDAY_READS).default('summary'),
         memberId:z.string().optional().describe('Member attribution in household mode, required for personal 7d/30d report'),
@@ -215,11 +215,16 @@ function createMcpServer() {
         focus:z.enum(['daily','food','health']).default('daily').describe('Today summary category'),
         date:z.string().optional().describe('Exact YYYY-MM-DD for meals'),
         queries:z.array(z.string()).min(1).max(6).optional().describe('Local food names for foods view'),
-        limit:z.number().int().min(1).max(5).default(5)
+        limit:z.number().int().min(1).max(5).default(5),
+        query:z.string().max(100).optional().describe('recipes: name filter'),
+        recipeId:z.string().optional().describe('recipes: return one recipe with ingredients and steps'),
+        fromDate:z.string().optional().describe('plan/shopping: YYYY-MM-DD, default today'),
+        toDate:z.string().optional().describe('plan/shopping: YYYY-MM-DD, at most 14 days'),
+        includeLogged:z.boolean().optional().describe('shopping: also count plan entries already logged')
       }
     },compactCall(everyday.query));
     mcp.registerTool('nutrition_execute', {
-      description:'Five user intents only: meal (text estimate by default; source=measured for foodId-based weighed entry), correct (name or ID), health (checkin or typed observation), photo_stage (DRAFT preview only), photo_confirm (after explicit one-time user approval). Underlying engine still verifies provenance, versions and idempotency.',
+      description:'Eleven user intents only: meal (text estimate by default; source=measured for foodId-based weighed entry), correct (name or ID), health (checkin or typed observation), photo_stage (DRAFT preview only), photo_confirm (after explicit one-time user approval), photo_discard (close one specified unconfirmed draft; does not book or delete ledger entries), recipe_save (name, servings, items=[{foodId,weightGrams}] for the WHOLE batch, steps?; recipeId to replace), plan_set (date, mealSlot, recipeId, servings, replace?; future dates allowed), plan_remove (entryId, unlogged only), plan_log (entryId, requestId, servings? actually eaten; books the entry split into ingredients, not for future dates), food_add (name, aliases?, state raw|cooked|as_sold, p/c/f per 100g, dataSource, requestId; server checks similar foods first and only adds after reviewedCandidateIds+confirmDistinct; daily cap). Open drafts remain reminders until the user confirms or clearly asks to dismiss that draft; never auto-discard. Underlying engine still verifies provenance, versions and idempotency.',
       inputSchema:{
         memberId:z.string().optional().describe('Member attribution, not separate authentication'),
         operation:z.enum(EVERYDAY_WRITES),
@@ -240,8 +245,21 @@ function createMcpServer() {
           hrvMetric:z.enum(['SDNN','RMSSD']).optional(),
           measuredAt:z.string().optional(),sourceEventId:z.string().optional(),
           kind:z.string().optional(),systolic:z.number().optional(),
-          diastolic:z.number().optional(),value:z.number().optional(),note:z.string().optional()
-        }).passthrough().default({}).describe('For photo_stage/confirm, use the existing estimate_meal_photo MCP Prompt: estimate/matches or draftId/confirmed/confirmationEvidence/decisions; never commit without approval'),
+          diastolic:z.number().optional(),value:z.number().optional(),note:z.string().optional(),
+          draftId:z.string().min(1).optional().describe('Required for photo_confirm and photo_discard; discard closes only this one unconfirmed draft'),
+          name:z.string().optional().describe('recipe_save: recipe name'),
+          servings:z.number().positive().optional().describe('recipe_save: servings per batch; plan_set/plan_log: servings eaten'),
+          steps:z.array(z.string()).optional().describe('recipe_save: optional cooking steps'),
+          recipeId:z.string().optional().describe('recipe_save (update) / plan_set'),
+          entryId:z.string().optional().describe('plan_remove / plan_log'),
+          replace:z.boolean().optional().describe('plan_set: replace unlogged entries in that date+slot'),
+          aliases:z.array(z.string()).optional().describe('food_add: other names, e.g. 西红柿'),
+          state:z.enum(['raw','cooked','as_sold']).optional().describe('food_add: nutrient values are per 100g raw / cooked / as sold'),
+          p:z.number().min(0).optional(),c:z.number().min(0).optional(),f:z.number().min(0).optional(),
+          dataSource:z.string().optional().describe('food_add: source of the per-100g values'),
+          reviewedCandidateIds:z.array(z.string()).optional().describe('food_add: all similar-food candidate IDs you reviewed'),
+          confirmDistinct:z.boolean().optional().describe('food_add: none of the reviewed candidates is the same food'),
+        }).passthrough().default({}).describe('For photo_stage/confirm, use the existing estimate_meal_photo MCP Prompt: estimate/matches or draftId/confirmed/confirmationEvidence/decisions; never commit without approval. photo_discard takes only draftId and requires explicit user intent to dismiss that draft'),
         includeContext:z.boolean().default(true).describe('Include short updated context after routine writes')
       }
     },compactCall(everyday.execute));

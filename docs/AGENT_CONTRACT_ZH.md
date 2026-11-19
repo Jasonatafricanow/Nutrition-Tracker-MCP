@@ -7,7 +7,7 @@
 - 宿主 LLM：理解用户饮食、识别食物照片、估算且标注不确定性、必要时追问、请求用户对照片预览作一次确认。
 - Nutrition：确定性校验、SQLite 账本、食材 ID 查验、版本修订、幂等、来源记录、报告计算、照片草稿确认。
 - 默认只发现两个工具：`nutrition_query` 和 `nutrition_execute`。不要寻找 `get_agent_context` / `log_meal_items` / `get_agent_workflow` 等历史工具。
-- 日常会话中仅允许下述 **3 个 view + 5 个 operation**。可按需读取 MCP Prompt `nutrition_agent_workflow`；照片任务可额外读取 `estimate_meal_photo` Prompt。
+- 日常会话中仅允许下述 **6 个 view + 11 个 operation**。可按需读取 MCP Prompt `nutrition_agent_workflow`；照片任务可额外读取 `estimate_meal_photo` Prompt。
 
 ## 查询：nutrition_query
 
@@ -16,6 +16,9 @@
 | `summary` | 今日情况，7/30 天历史摘要 | `period:"today"|"7d"|"30d"`、`focus:"daily"|"food"|"health"`（仅当天）、`memberId?` |
 | `meals` | 查某日餐食及 mealId/修订版本 | `memberId?`、`date?` |
 | `foods` | 验证本地食材 ID，允许一次查最多六种 | `memberId?`、`queries:["熟米饭","鸡肉"]` |
+| `recipes` | 查已存菜谱及每份营养 | `query?` 或 `recipeId`（单个菜谱含原料、步骤） |
+| `plan` | 看膳食计划与目标差额 | `fromDate?`、`toDate?`（≤14 天）；返回每餐菜谱、目标、已记摄入、计划合计、差额 |
+| `shopping` | 由计划生成采购清单 | `fromDate?`、`toDate?`、`includeLogged?`；按食材条目合并，熟重条目需换算生重 |
 
 示例（指定家庭成员时须有已知 `memberId`）：
 
@@ -37,6 +40,12 @@ nutrition_query({view:"foods",memberId:"adult_a",queries:["熟米饭","鸡胸肉
 | `health` | 报体重、睡眠、心率等测量 | 按实际 `scaleWeightKg`、`sleepHours`、`rhrBpm` 等来源字段；家庭专项观测需要 `kind` |
 | `photo_stage` | 照片识别后暂存草稿 | `mealSlot`、`estimate`、按真实查询所得 `matches?`；**不入账** |
 | `photo_confirm` | 用户一次整体批准照片候选后入账 | `draftId`、`confirmed:true`、`confirmationEvidence`、`requestId`、`decisions` |
+| `photo_discard` | 关闭指定的未确认照片草稿 | 只要 `draftId`；不入账、不能删除已入账款项；仅关闭这一份草稿 |
+| `recipe_save` | 新建/修改菜谱 | `name`、`servings`、`items:[{foodId,weightGrams}]`（整锅克数）、`steps?`、`note?`；给 `recipeId` 为整体替换 |
+| `plan_set` | 把菜谱排进某天某餐 | `date`、`mealSlot`、`recipeId`、`servings`、`replace?`；可排未来日期，不入账 |
+| `plan_remove` | 删除一条未入账计划项 | `entryId`；不影响账本 |
+| `food_add` | 库里确实没有的食材 | `name`、`aliases?`、`state`（raw/cooked/as_sold）、每100g `p/c/f`、`dataSource`、`requestId`；服务端先查近似条目，有候选就拒绝并返回；逐一核对后带 `reviewedCandidateIds`+`confirmDistinct:true` 才新增；每日上限 10 条 |
+| `plan_log` | 用户说吃了计划里的一餐 | `entryId`、`requestId`、`servings?`（实际份数）；按每份克数拆原料入账，未来日期拒绝 |
 
 文字估算：
 
@@ -85,6 +94,7 @@ nutrition_execute({operation:"health",memberId:"adult_a",args:{sleepHours:6.5,rh
 2. `nutrition_execute({operation:"photo_stage",args:{mealSlot,estimate,matches?}})` 返回未入账草稿及简短食物、份量预览。
 3. Agent 向用户展示简短预览并取得一次明确同意或更正。
 4. 仅在同意之后，传 `photo_confirm` 所需 `draftId`、完整 `decisions`、真实 `confirmationEvidence` 和防重 `requestId`，由现有引擎原子入账。
+5. 未确认草稿应继续作为占位提醒保留。只有用户明确表示不要了、记错了或不管它时，才对**指定**草稿调用 `photo_discard`。不得自动丢弃，不得批量丢弃，也不得为了清掉提醒而擅自关闭。`photo_discard` 不会入账，也不能删除已经入账的餐食。
 
 不得把图片走 `meal` 的文字估算捷径，也不得先入账再向用户索要确认。底层更细的 `decisions` 结构详见 [照片编译协议](PHOTO_ESTIMATION_PROTOCOL.md)，无需让用户逐项填写 JSON。
 
@@ -92,7 +102,7 @@ nutrition_execute({operation:"health",memberId:"adult_a",args:{sleepHours:6.5,rh
 
 | MCP_TOOL_SURFACE | 何时启用 |
 | --- | --- |
-| `everyday`（默认） | 日常聊天，三查五写 |
+| `everyday`（默认） | 日常聊天，三查六写 |
 | `compact` | 原 v5.4 调用兼容、主动请求的专业操作（旧 12+18 分支） |
 | `full` | 历史低层工具兼容、专业运维及维护 |
 

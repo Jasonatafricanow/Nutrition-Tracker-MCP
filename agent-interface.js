@@ -9,16 +9,17 @@ const READ_GROUPS = {
   photo: ['get_photo_estimation_protocol','get_photo_meal_draft'],
   planning: ['get_snapshot','get_agent_context','set_day_context','update_weekly_schedule','calibrate_metabolic_tdee'],
   history: ['get_meal_history','get_meal_corrections','export_nutrition_data','report'],
-  extras: ['save_meal_template','log_meal_template','update_supplement_stack','add_food_to_library','family_recipes','barcode']
+  extras: ['recipes','meal_plan','shopping_list','save_meal_template','log_meal_template','update_supplement_stack','add_food_to_library','family_recipes','barcode']
 };
 const OPERATIONS = Object.freeze({
   meal:'log_meal_items', quick_meal:'log_estimated_meal', checkin:'log_morning_checkin', correction:'update_meal_item', recent_correction:'correct_recent_meal',
   photo_stage:'stage_photo_estimate', photo_confirm:'confirm_photo_meal', photo_discard:'discard_photo_meal',
   template_save:'save_meal_template', template_log:'log_meal_template',
   supplement:'update_supplement_stack', plan:'set_day_context', profile:'set_profile',
-  intake_complete:'mark_intake_complete', food_add:'add_food_to_library'
+  intake_complete:'mark_intake_complete', food_add:'add_food_to_library',
+  recipe_save:'save_recipe', plan_set:'set_meal_plan', plan_remove:'remove_plan_entry', plan_log:'log_plan_entry', food_add_checked:'add_checked_food'
 });
-const RESTRICTED = new Set(['get_snapshot','get_agent_context','get_meal_history','get_meal_corrections','get_photo_meal_draft','get_photo_estimation_protocol','search_foods','list_meal_templates','export_nutrition_data']);
+const RESTRICTED = new Set(['get_snapshot','get_agent_context','get_meal_history','get_meal_corrections','get_photo_meal_draft','get_photo_estimation_protocol','search_foods','list_meal_templates','export_nutrition_data','list_recipes','get_meal_plan','get_shopping_list']);
 const clean = v=>Object.fromEntries(Object.entries(v).filter(([,x])=>x!==null&&x!==undefined));
 
 export function createAgentInterface({engine,household=null,usda=null,openFoodFacts=null}={}){
@@ -48,7 +49,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      if(focus==='all')base.dataQuality=m.dataQuality;
      return base;
    })});
- async function query({view='household',memberId,focus='daily',date,days=14,queries=[],query:term='',barcode,limit=5,draftId,domain='daily',source='local'}={}){
+ async function query({view='household',memberId,focus='daily',date,days=14,queries=[],query:term='',barcode,limit=5,draftId,domain='daily',source='local',recipeId,fromDate,toDate,includeLogged=false}={}){
    if(view==='capabilities'){
      if(!(domain in READ_GROUPS))throw Error('unknown capabilities domain');
      return {ok:true,domain,available:READ_GROUPS[domain],writeOperations:Object.keys(OPERATIONS),
@@ -114,6 +115,13 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      const r=call('list_meal_templates',{query:term,limit:Math.min(limit,10)});
      return r;
    }
+   if(view==='recipes'){
+     return call('list_recipes',recipeId?{recipeId}:{query:term,limit:Math.min(limit,10)});
+   }
+   if(view==='meal_plan'||view==='shopping_list'){
+     const range=clean({fromDate:fromDate??date,toDate});
+     return view==='meal_plan'?call('get_meal_plan',range):call('get_shopping_list',{...range,includeLogged:!!includeLogged});
+   }
    if(view==='photo_draft'){
      if(!draftId)throw Error('draftId required');return call('get_photo_meal_draft',{draftId});
    }
@@ -125,9 +133,9 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
  }
  function execute({memberId,operation,args={},tool,includeContext=true}={}){
    const afterWrite=(out)=>{
-     if(!includeContext||!['meal','quick_meal','checkin','health_observation','correction','recent_correction'].includes(operation))return out;
+     if(!includeContext||!['meal','quick_meal','checkin','health_observation','correction','recent_correction','plan_log'].includes(operation))return out;
      if(household){const r=household.context({days:3,memberId});
-       const c=projectHousehold(r,['meal','quick_meal','correction','recent_correction'].includes(operation)?'food':'health');
+       const c=projectHousehold(r,['meal','quick_meal','correction','recent_correction','plan_log'].includes(operation)?'food':'health');
        return {...out,context:c.members[0]};
      }
      const x=engine.execute('get_agent_context',{},'MCP_COMPACT');
