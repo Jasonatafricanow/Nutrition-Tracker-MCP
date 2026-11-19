@@ -112,11 +112,14 @@ app.get("/api/stream", (req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
-    Connection: "keep-alive"
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no" // the LAN ingress is nginx: pass events through unbuffered
   });
   res.write(`data: ${JSON.stringify(engine.buildSnapshot())}\n\n`);
   sseClients.add(res);
-  req.on("close", () => sseClients.delete(res));
+  // nginx drops a proxied stream after 60s without data; a comment line every 25s keeps it open.
+  const ping = setInterval(() => res.write(": ping\n\n"), 25000);
+  req.on("close", () => { clearInterval(ping); sseClients.delete(res); });
 });
 
 app.post("/api/mcp-dispatch", authorizeDispatch, (req, res) => {
