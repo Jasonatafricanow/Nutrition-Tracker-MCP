@@ -462,6 +462,7 @@ export const TOOL_DEFS = {
       aliases: z.array(z.string().trim().min(1).max(20)).max(6).default([]).describe("家里怎么叫它，如 大盒面"),
       unit: z.enum(["g", "ml"]).default("g").describe("标签计量单位：固体 g，饮料 ml"),
       netAmount: z.number().positive().max(10000).optional().describe("整包净含量（按 unit），如 115"),
+      pieces: z.number().int().min(2).max(200).optional().describe("一包里有几个（标签或包装写明的），如 6 个装小可颂；吃一个 = netAmount ÷ pieces"),
       basis: z.enum(["per100", "perServing"]).default("per100").describe("营养表是每 100g/100mL 还是每份"),
       servingAmount: z.number().positive().max(5000).optional().describe("basis=perServing 时每份多少 g 或 mL"),
       energyKj: z.number().positive().max(5000).optional().describe("标签上的能量（kJ），按 basis"),
@@ -737,6 +738,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
     energy_kj REAL, energy_kcal REAL, barcode TEXT, source TEXT NOT NULL, created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_food_labels_barcode ON food_labels(barcode);`);
+  if (!db.prepare("PRAGMA table_info(food_labels)").all().some((c) => c.name === "pieces")) db.exec("ALTER TABLE food_labels ADD COLUMN pieces INTEGER");
 
   const tx = (fn) => {
     db.exec("BEGIN IMMEDIATE");
@@ -884,7 +886,8 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
   function foodRow(r) {
     const out = { id: r.id, name: r.name, p: r.p, c: r.c, f: r.f, kcal: Math.round(r.kcal ?? kcalOf(r.p, r.c, r.f)) };
     if (r.brand == null) return out;
-    return { ...out, unit: r.unit, kcalFrom: "label", label: { brand: r.brand, netAmount: r.net_amount, basis: r.basis,
+    const pieces = r.pieces && r.net_amount ? { pieces: r.pieces, pieceAmount: round1(r.net_amount / r.pieces) } : {};
+    return { ...out, unit: r.unit, kcalFrom: "label", label: { brand: r.brand, netAmount: r.net_amount, ...pieces, basis: r.basis,
       barcode: r.barcode, aliases: JSON.parse(r.aliases_json || "[]") } };
   }
   // Package-label foods are the household's, like the fridge: the same rows (same foodId) go into every member's library.
@@ -897,9 +900,9 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       for (const r of rows) {
         if (q("SELECT 1 FROM foods WHERE id=?").get(r.id)) continue;
         q("INSERT INTO foods (id, name, p, c, f, kcal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(r.id, r.name, r.p, r.c, r.f, r.kcal, r.created_at);
-        q(`INSERT OR IGNORE INTO food_labels (food_id,brand,product,variant,aliases_json,unit,net_amount,basis,serving_amount,energy_kj,energy_kcal,barcode,source,created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(r.id, r.brand, r.product, r.variant, r.aliases_json, r.unit, r.net_amount, r.basis,
-          r.serving_amount, r.energy_kj, r.energy_kcal, r.barcode, r.source, r.created_at);
+        q(`INSERT OR IGNORE INTO food_labels (food_id,brand,product,variant,aliases_json,unit,net_amount,basis,serving_amount,energy_kj,energy_kcal,barcode,source,created_at,pieces)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(r.id, r.brand, r.product, r.variant, r.aliases_json, r.unit, r.net_amount, r.basis,
+          r.serving_amount, r.energy_kj, r.energy_kcal, r.barcode, r.source, r.created_at, r.pieces ?? null);
         added++;
       }
     });
@@ -1458,7 +1461,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
 
     search_foods(a) {
       const escaped=a.query.trim().replace(/[\\%_]/g,ch=>"\\"+ch);
-      const rows=q(`SELECT f.id,f.name,f.p,f.c,f.f,f.kcal,l.brand,l.unit,l.net_amount,l.basis,l.barcode,l.aliases_json FROM foods f
+      const rows=q(`SELECT f.id,f.name,f.p,f.c,f.f,f.kcal,l.brand,l.unit,l.net_amount,l.basis,l.barcode,l.aliases_json,l.pieces FROM foods f
         LEFT JOIN food_labels l ON l.food_id=f.id
         WHERE f.name LIKE ? ESCAPE '\\' OR l.aliases_json LIKE ? ESCAPE '\\'
         ORDER BY CASE WHEN f.name LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END, f.name LIMIT ?`)
@@ -1639,7 +1642,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         const same = labels.find((l) => a.barcode && l.barcode === a.barcode)
           ?? labels.find((l) => key(l.brand) === key(a.brand) && key(l.product) === key(a.name) && key(l.variant) === key(a.variant)
             && l.unit === a.unit && (l.net_amount ?? null) === (a.netAmount ?? null));
-        if (same) return { ok: true, added: false, reason: "duplicate", existing: foodRow(q(`SELECT f.*,l.brand,l.unit,l.net_amount,l.basis,l.barcode,l.aliases_json
+        if (same) return { ok: true, added: false, reason: "duplicate", existing: foodRow(q(`SELECT f.*,l.brand,l.unit,l.net_amount,l.basis,l.barcode,l.aliases_json,l.pieces
           FROM foods f JOIN food_labels l ON l.food_id=f.id WHERE f.id=?`).get(same.food_id)), instruction: "库里已有这一款，直接用它的 foodId。" };
         const otherSpecs = labels.filter((l) => key(l.brand) === key(a.brand) && key(l.product) === key(a.name))
           .map((l) => ({ foodId: l.food_id, name: l.name }));
@@ -1647,12 +1650,13 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         const display = `${a.brand}${a.name}${a.variant ? " " + a.variant : ""}${net}`;
         const id = "label_" + randomUUID(), at = nowIso();
         q("INSERT INTO foods (id, name, p, c, f, kcal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, display, per.p, per.c, per.f, kcal, at);
-        q(`INSERT INTO food_labels (food_id,brand,product,variant,aliases_json,unit,net_amount,basis,serving_amount,energy_kj,energy_kcal,barcode,source,created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, a.brand, a.name, a.variant, JSON.stringify(a.aliases), a.unit, a.netAmount ?? null, a.basis,
-          a.servingAmount ?? null, a.energyKj ?? null, a.energyKcal ?? null, a.barcode ?? null, a.source, at);
+        if (a.pieces && !a.netAmount) throw new ToolError("给了 pieces（几个装）就要给 netAmount（整包净含量），否则算不出一个多重");
+        q(`INSERT INTO food_labels (food_id,brand,product,variant,aliases_json,unit,net_amount,basis,serving_amount,energy_kj,energy_kcal,barcode,source,created_at,pieces)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, a.brand, a.name, a.variant, JSON.stringify(a.aliases), a.unit, a.netAmount ?? null, a.basis,
+          a.servingAmount ?? null, a.energyKj ?? null, a.energyKcal ?? null, a.barcode ?? null, a.source, at, a.pieces ?? null);
         journal(source, "add_label_food", { foodId: id, ...a }, `录入包装食品：${display}（每100${a.unit} ${Math.round(kcal)} kcal）`);
         return { ok: true, added: true, food: foodRow({ id, name: display, ...per, kcal, brand: a.brand, unit: a.unit, net_amount: a.netAmount ?? null,
-          basis: a.basis, barcode: a.barcode ?? null, aliases_json: JSON.stringify(a.aliases) }), otherSpecs };
+          basis: a.basis, barcode: a.barcode ?? null, aliases_json: JSON.stringify(a.aliases), pieces: a.pieces ?? null }), otherSpecs };
       });
       return { result: out, summary: null };
     },
@@ -1919,6 +1923,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
     buildSnapshot,
     labelFoods,
     importLabelFoods,
+    foodExists: (id) => !!q("SELECT 1 FROM foods WHERE id=?").get(id),
     dataVersion: () => q("PRAGMA data_version").get().data_version,
     close: () => db.close()
   };

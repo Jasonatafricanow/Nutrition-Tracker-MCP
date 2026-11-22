@@ -78,6 +78,18 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      if(!household)throw Error('meds requires household mode');
      return household.stock.meds({memberId});
    }
+   if(view==='timeline'){
+     if(!household)throw Error('timeline requires household mode');
+     return household.timeline({memberId,days});
+   }
+   if(view==='kitchen'){
+     if(!household)throw Error('kitchen requires household mode');
+     return household.kitchen.kitchen();
+   }
+   if(view==='menu'){
+     if(!household)throw Error('menu requires household mode');
+     return household.kitchen.menu({menuId:recipeId});
+   }
    if(view==='health_history'){
      if(!household)throw Error('health_history requires household mode');
      if(!memberId)throw Error('memberId required');
@@ -162,10 +174,18 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      return afterWrite(household.logObservation({memberId,...args}));
    }
    // Household stock (fridge, medicine cabinet): shared, not a member's ledger.
-   const STOCK={pantry_add:'pantryAdd',pantry_use:'pantryUse',pantry_discard:'pantryDiscard',pantry_edit:'pantryEdit',med_save:'medSave'};
+   const STOCK={pantry_add:'pantryAdd',pantry_use:'pantryUse',pantry_discard:'pantryDiscard',pantry_edit:'pantryEdit',med_save:'medSave',
+     dose_link:'linkDose',dose_unlink:'unlinkDose'};
    if(Object.hasOwn(STOCK,operation)){
      if(!household)throw Error(operation+' requires household mode');
-     return household.stock[STOCK[operation]](args);
+     return household.stock[STOCK[operation]](operation==='dose_link'?{memberId,...args}:args);
+   }
+   // The kitchen (menus and stated preferences): shared by the household; never writes the pantry or a ledger.
+   const KITCHEN={menu_draft:'draft',menu_swap:'swap',menu_confirm:'confirm',menu_cooked:'cooked',menu_discard:'discard',
+     kitchen_pref_add:'prefAdd',kitchen_pref_remove:'prefRemove'};
+   if(Object.hasOwn(KITCHEN,operation)){
+     if(!household)throw Error(operation+' requires household mode');
+     return household.kitchen[KITCHEN[operation]](args);
    }
    if(operation==='acknowledge'){
      if(!household)throw Error('acknowledge requires household mode');

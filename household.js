@@ -6,6 +6,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { createHomeStock } from './home-stock.js';
+import { createKitchen } from './kitchen.js';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -60,7 +61,9 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
       PRIMARY KEY(member_id, signal)
     );`);
   // The fridge and the medicine cabinet belong to the household, not to one member's ledger.
-  const stock=createHomeStock({database,now,timeZone:config.timeZone??'Asia/Shanghai'});
+  const zone=config.timeZone??'Asia/Shanghai';
+  // A pantry item may point at a food-library entry; label foods share one foodId across the household.
+  const stock=createHomeStock({database,now,timeZone:zone,foodName:primaryEngine?.foodExists?id=>primaryEngine.foodExists(id):null});
   const engines=new Map(primary?[[primary,primaryEngine]]:[]);
   const member=id=>{const m=byId.get(id);if(!m)throw Error('unknown memberId');return m;};
   const memberEngine=id=>{
@@ -84,6 +87,17 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
     if(typeof tool!=='string'||tool==='get_household_context')throw Error('invalid nutrition tool');
     return memberEngine(memberId).execute(tool,args,source);
   };
+  // The kitchen reads what everyone ate lately (to avoid repeats) and can put a confirmed dish into a member's plan.
+  const kitchen=createKitchen({database,stock,now,timeZone:zone,
+    recentMeals:days=>{
+      const end=dayInZone(now(),zone),out=[];
+      for(const m of members)for(let i=0;i<days;i++){const date=shiftDay(end,-i);
+        for(const x of memberTool(m.id,'get_meal_history',{date}).meals)out.push({name:x.name,date});}
+      return out;
+    },
+    planSet:(memberId,args)=>{member(memberId);return memberTool(memberId,'set_meal_plan',args);}});
+  // Symptom/dose timeline per member; one member's view never includes another's.
+  const timeline=({memberId,days=7}={})=>stock.timeline({memberIds:memberId?[member(memberId).id]:members.map(m=>m.id),days});
   const logObservation = ({memberId,kind,observedAt,note,sourceEventId,systolic,diastolic,value})=>{
     const m=member(memberId);
     if(!KINDS.has(kind))throw Error('unknown observation kind');
@@ -173,6 +187,6 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
     database.prepare('INSERT INTO mentions VALUES(?,?,?) ON CONFLICT(member_id,signal) DO UPDATE SET last_date=excluded.last_date').run(memberId,signal,day);
     return {ok:true,memberId,signal,lastMentioned:day};
   };
-  return {members,primary,member,memberTool,logObservation,observations,context,acknowledge,stock,shareLabelFoods,
+  return {members,primary,member,memberTool,logObservation,observations,context,acknowledge,stock,kitchen,timeline,shareLabelFoods,
     close(){for(const [id,e] of engines)if(id!==primary)e.close();database.close();}};
 }

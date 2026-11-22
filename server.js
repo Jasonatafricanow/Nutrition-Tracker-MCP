@@ -191,7 +191,24 @@ app.post("/api/dose-webhook", authorizeWebhook, (req,res)=>{
     household.member(memberId);
     if(!b.sourceEventId||typeof b.sourceEventId!=='string')return res.status(400).json({ok:false,error:"sourceEventId required"});
     const out=household.stock.logDose({memberId,medication:b.medication,takenAt:b.takenAt,amount:b.amount,
-      sourceEventId:b.sourceEventId,source:b.source?`statebar:${b.source}`:'statebar',note:b.note});
+      sourceEventId:b.sourceEventId,source:b.source?`statebar:${b.source}`:'statebar',note:b.note,void:b.void===true,reason:b.reason});
+    broadcast();
+    return res.json(out);
+  }catch(e){return res.status(400).json({ok:false,error:e.message});}
+});
+
+// A symptom appearing, easing or going away, as the member said it. Only statebar posts here (its symptom
+// states are the source; the plugin keeps them for the symptom/dose timeline and infers nothing from them).
+// {void:true, sourceEventId} retracts one (the row stays, traceable). Same token as the health webhook.
+app.post("/api/symptom-webhook", authorizeWebhook, (req,res)=>{
+  const b=req.body||{};
+  try{
+    if(!household)return res.status(400).json({ok:false,error:"symptom log requires household mode"});
+    const memberId=b.memberId??household.primary;
+    household.member(memberId);
+    if(!b.sourceEventId||typeof b.sourceEventId!=='string')return res.status(400).json({ok:false,error:"sourceEventId required"});
+    const out=household.stock.logSymptom({memberId,symptom:b.symptom,key:b.key,status:b.status,at:b.at,episodeId:b.episodeId,
+      sourceEventId:b.sourceEventId,source:b.source?`statebar:${b.source}`:'statebar',void:b.void===true,reason:b.reason});
     broadcast();
     return res.json(out);
   }catch(e){return res.status(400).json({ok:false,error:e.message});}
@@ -250,7 +267,7 @@ function createMcpServer() {
   };
   if (surface==='everyday') {
     mcp.registerTool('nutrition_query', {
-      description:'Everyday nutrition reads. summary = today or observed-data 7d/30d report; meals = a dated meal ledger for review/correction; foods = one batch of 1–6 LOCAL food names; recipes = saved recipes with per-serving nutrition (recipeId for one); plan = meal plan for fromDate..toDate with targets, logged intake and gap; shopping = merged ingredient list for unlogged plan entries; pantry = what is in the fridge now, soonest to expire first (includeGone for used/discarded); meds = the medicine cabinet and, per member, last dose / next allowed time; workouts = what each member did this week and recently (from statebar). For specialist tools use the opt-in compact/full profile.',
+      description:'Everyday nutrition reads. summary = today or observed-data 7d/30d report; meals = a dated meal ledger for review/correction; foods = one batch of 1–6 LOCAL food names; recipes = saved recipes with per-serving nutrition (recipeId for one); plan = meal plan for fromDate..toDate with targets, logged intake and gap; shopping = merged ingredient list for unlogged plan entries; pantry = what is in the fridge now, soonest to expire first (includeGone for used/discarded); meds = the medicine cabinet and, per member, last dose / next allowed time; workouts = what each member did this week and recently (from statebar); timeline = per member, symptoms (appeared/eased/gone, from statebar) and doses side by side in time order with doseId/episodeId and only user-stated links (memberId = only that member; nearness in time means nothing); kitchen = what there is to cook with: fridge (soonest to expire), recently used up, dishes eaten in the last 7 days, the stated household preferences, open menus — read it before proposing a menu; menu = one menu (menuId) with dishes, what to buy / check at home / already have, prep-and-stove timeline and warnings. For specialist tools use the opt-in compact/full profile.',
       inputSchema:{
         view:z.enum(EVERYDAY_READS).default('summary'),
         memberId:z.string().optional().describe('Member attribution in household mode, required for personal 7d/30d report'),
@@ -265,11 +282,12 @@ function createMcpServer() {
         toDate:z.string().optional().describe('plan/shopping: YYYY-MM-DD, at most 14 days'),
         includeLogged:z.boolean().optional().describe('shopping: also count plan entries already logged'),
         includeGone:z.boolean().optional().describe('pantry: also list used-up and discarded items'),
-        days:z.number().int().min(1).max(90).optional().describe('workouts: how many days back, default 14')
+        days:z.number().int().min(1).max(90).optional().describe('workouts: how many days back, default 14; timeline: default 7, at most 60'),
+        menuId:z.string().optional().describe('menu: which menu')
       }
     },compactCall(everyday.query));
     mcp.registerTool('nutrition_execute', {
-      description:'Thirteen user intents only: meal (text estimate by default; source=measured for foodId-based weighed entry), correct (name or ID), health (checkin or typed observation), photo_stage (DRAFT preview only), photo_confirm (after explicit one-time user approval), photo_discard (close one specified unconfirmed draft; does not book or delete ledger entries), recipe_save (name, servings, items=[{foodId,weightGrams}] for the WHOLE batch, steps?; recipeId to replace), plan_set (date, mealSlot, recipeId, servings, replace?; future dates allowed), plan_remove (entryId, unlogged only), plan_log (entryId, requestId, servings? actually eaten; books the entry split into ingredients, not for future dates), food_add (name, aliases?, state raw|cooked|as_sold, p/c/f per 100g, dataSource, requestId; server checks similar foods first and only adds after reviewedCandidateIds+confirmDistinct; daily cap) — or, for a packaged product whose nutrition label the user showed, food_add with label={brand,name,variant?,aliases?,netAmount?,unit g|ml,basis per100|perServing,servingAmount?,energyKj (as printed),p,c,f,barcode?} and requestId: booked kcal then come from the label energy, the food is shared by the whole household, the same product returns the existing foodId; skip unreadable labels. Showing a label is not eating it and not a pantry add, pantry (action add|use|discard|edit: add items=[{name,quantity as said,shelfLifeDays? or expiresOn?}] from a receipt or a sentence; use name|itemId + remaining in the user words, empty = used up), med (save one medicine in the household cabinet: name, aliases?, forMembers?, dose, minIntervalHours?, maxPerDay?; doses TAKEN are not written here, they come from statebar). Open drafts remain reminders until the user confirms or clearly asks to dismiss that draft; never auto-discard. Underlying engine still verifies provenance, versions and idempotency.',
+      description:'Fifteen user intents only: meal (text estimate by default; source=measured for foodId-based weighed entry), correct (name or ID), health (checkin or typed observation), photo_stage (DRAFT preview only), photo_confirm (after explicit one-time user approval), photo_discard (close one specified unconfirmed draft; does not book or delete ledger entries), recipe_save (name, servings, items=[{foodId,weightGrams}] for the WHOLE batch, steps?; recipeId to replace), plan_set (date, mealSlot, recipeId, servings, replace?; future dates allowed), plan_remove (entryId, unlogged only), plan_log (entryId, requestId, servings? actually eaten; books the entry split into ingredients, not for future dates), food_add (name, aliases?, state raw|cooked|as_sold, p/c/f per 100g, dataSource, requestId; server checks similar foods first and only adds after reviewedCandidateIds+confirmDistinct; daily cap) — or, for a packaged product whose nutrition label the user showed, food_add with label={brand,name,variant?,aliases?,netAmount?,unit g|ml,basis per100|perServing,servingAmount?,energyKj (as printed),p,c,f,barcode?} and requestId: booked kcal then come from the label energy, the food is shared by the whole household, the same product returns the existing foodId; skip unreadable labels. Showing a label is not eating it and not a pantry add, pantry (action add|use|discard|edit: add items=[{name,quantity as said,shelfLifeDays? or expiresOn?}] from a receipt or a sentence; use name|itemId + remaining in the user words, empty = used up), med (action save (default): one medicine in the household cabinet: name, aliases?, ingredient? (active ingredient), strength?, form? 普通|缓释|控释|肠溶|其他, forMembers?, dose, minIntervalHours?, maxPerDay?, ruleSource? 说明书|医嘱|用户说, expiresOn? YYYY-MM(-DD) — read off the box/leaflet, never guess a rule; action link: doseId + episodeId|symptom + userWords (quote the user saying this dose was for that symptom) + requestId; action unlink: linkId. Doses TAKEN and symptoms are not written here, they come from statebar; a box photographed or saved is not a dose), menu (action draft: dishes=[{name,kind 荤|素|汤|主食|凉菜|小食,recipeId?,ingredients=[{name,amount?,foodId?,buy? true only when the user said there is none}],prepMin,cookMin,appliance? 灶|蒸锅|电饭煲|烤箱|空气炸锅|无,heat,seasoning,doneness,steps?}], date?, mealSlot?, serveAt HH:MM, diners? e.g. 两大一小, want?={dishes,soups,must:[dish names the user asked for]}, burners?, requestId → returns menuId, shopping (buy / checkAtHome / have), timeline and warnings; a draft is not cooked and moves nothing; action swap: menuId + dishId + dish (one replacement; the rest stay as they are); action confirm: menuId, plan?=[{memberId,dishId,servings}] for dishes with a saved recipe; action cooked: menuId (only when the user says it was made; then pantry use for what is left, and each person books what they ate); action discard: menuId), kitchen_pref (action add: kind avoid_main (不做正菜)|not_default (不默认上)|note, text — only preferences the user stated; action remove: prefId). Open drafts remain reminders until the user confirms or clearly asks to dismiss that draft; never auto-discard. Underlying engine still verifies provenance, versions and idempotency.',
       inputSchema:{
         memberId:z.string().optional().describe('Member attribution, not separate authentication'),
         operation:z.enum(EVERYDAY_WRITES),
@@ -310,7 +328,8 @@ function createMcpServer() {
             netAmount:z.number().positive().optional(),unit:z.enum(['g','ml']).optional(),
             basis:z.enum(['per100','perServing']).optional(),servingAmount:z.number().positive().optional(),
             energyKj:z.number().positive().optional(),energyKcal:z.number().positive().optional(),
-            p:z.number().min(0),c:z.number().min(0),f:z.number().min(0),barcode:z.string().optional()
+            p:z.number().min(0),c:z.number().min(0),f:z.number().min(0),barcode:z.string().optional(),
+            pieces:z.number().int().min(2).optional().describe('how many pieces in the pack, as printed (6 个装)')
           }).optional().describe('food_add from a package nutrition label: values as printed on the label basis; kcal booked from the label energy'),
         }).passthrough().default({}).describe('For photo_stage/confirm, use the existing estimate_meal_photo MCP Prompt: estimate/matches or draftId/confirmed/confirmationEvidence/decisions; never commit without approval. photo_discard takes only draftId and requires explicit user intent to dismiss that draft'),
         includeContext:z.boolean().default(true).describe('Include short updated context after routine writes')

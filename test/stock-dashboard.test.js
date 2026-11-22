@@ -35,6 +35,11 @@ test('dashboard stock views return fridge, cabinet and workouts; cross-origin re
   assert.equal((await hook('/api/dose-webhook',{memberId:'kid',medication:'布洛芬混悬液',takenAt:new Date(Date.now()-3600_000).toISOString(),sourceEventId:'d1'})).status,200);
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai'}).format(new Date());
   assert.equal((await hook('/api/workout-webhook',{memberId:'owner',activity:'跑步',date:today,durationMin:30,sourceEventId:'w1'})).status,200);
+  const sym=await hook('/api/symptom-webhook',{symptom:'喉咙疼',key:'sore_throat',status:'active',at:new Date(Date.now()-7200_000).toISOString(),episodeId:'ep1',sourceEventId:'statebar:s1'});
+  assert.equal(sym.status,200);assert.equal((await sym.json()).duplicate,false);
+  assert.equal((await (await hook('/api/symptom-webhook',{symptom:'喉咙疼',status:'active',at:new Date().toISOString(),episodeId:'ep1',sourceEventId:'statebar:s1'})).json()).duplicate,true);
+  assert.equal((await hook('/api/symptom-webhook',{symptom:'喉咙疼',status:'gone',at:new Date().toISOString(),sourceEventId:'statebar:s2'})).status,400);
+  assert.equal((await fetch(base+'/api/symptom-webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
   const view=v=>fetch(base+'/api/household?view='+v).then(r=>r.json());
 
   const pantry=await view('pantry');

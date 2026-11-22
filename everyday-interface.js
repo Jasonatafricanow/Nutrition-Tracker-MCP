@@ -7,8 +7,8 @@
  *
  * Legacy compact and full interfaces remain selectable for migration.
  */
-export const EVERYDAY_READS = Object.freeze(['summary', 'meals', 'foods', 'recipes', 'plan', 'shopping', 'pantry', 'meds', 'workouts']);
-export const EVERYDAY_WRITES = Object.freeze(['meal', 'correct', 'health', 'photo_stage', 'photo_confirm', 'photo_discard', 'recipe_save', 'plan_set', 'plan_remove', 'plan_log', 'food_add', 'pantry', 'med']);
+export const EVERYDAY_READS = Object.freeze(['summary', 'meals', 'foods', 'recipes', 'plan', 'shopping', 'pantry', 'meds', 'workouts', 'timeline', 'kitchen', 'menu']);
+export const EVERYDAY_WRITES = Object.freeze(['meal', 'correct', 'health', 'photo_stage', 'photo_confirm', 'photo_discard', 'recipe_save', 'plan_set', 'plan_remove', 'plan_log', 'food_add', 'pantry', 'med', 'menu', 'kitchen_pref']);
 export const EVERYDAY_PERIODS = Object.freeze(['today', '7d', '30d']);
 
 import { createHash } from 'node:crypto';
@@ -23,7 +23,7 @@ const slot = value => typeof value === 'string' ? (SLOT_ALIASES[value.trim().toL
 // A write without requestId gets one from its own content: the same call retried is the same request,
 // so the engine's idempotency still holds; a different call is a different request.
 function withRequestId(memberId, operation, args) {
-  if (args.requestId || !['meal','correct','photo_stage','photo_confirm','plan_log','recipe_save','pantry','med'].includes(operation)) return args;
+  if (args.requestId || !['meal','correct','photo_stage','photo_confirm','plan_log','recipe_save','pantry','med','menu','kitchen_pref'].includes(operation)) return args;
   const digest = createHash('sha256').update(JSON.stringify([memberId ?? null, operation, args])).digest('hex').slice(0, 24);
   return {...args, requestId: `auto-${operation}-${digest}`};
 }
@@ -33,7 +33,7 @@ export function createEverydayInterface(compact) {
     throw new Error('existing compact nutrition engine adapter required');
   }
 
-  async function query({view='summary',memberId,period='today',focus='daily',date,queries,limit=5,query:term='',recipeId,fromDate,toDate,includeLogged=false,includeGone=false,days=14}={}) {
+  async function query({view='summary',memberId,period='today',focus='daily',date,queries,limit=5,query:term='',recipeId,menuId,fromDate,toDate,includeLogged=false,includeGone=false,days}={}) {
     if (!EVERYDAY_READS.includes(view)) throw new Error('Unsupported everyday read; use MCP_TOOL_SURFACE=compact for advanced reads');
     if (view === 'summary') {
       if (!EVERYDAY_PERIODS.includes(period)) throw new Error('period must be today, 7d or 30d');
@@ -51,7 +51,15 @@ export function createEverydayInterface(compact) {
     }
     if (view === 'pantry') return compact.query({view:'pantry',includeGone});
     if (view === 'meds') return compact.query({view:'meds',memberId});
-    if (view === 'workouts') return compact.query({view:'workouts',memberId,days});
+    if (view === 'workouts') return compact.query({view:'workouts',memberId,days:days ?? 14});
+    // Symptoms and doses side by side, per member (memberId = only that member).
+    if (view === 'timeline') return compact.query({view:'timeline',memberId,days:days ?? 7});
+    // What there is to cook with: fridge, what went off / ran out, recent dishes, stated preferences, open menus.
+    if (view === 'kitchen') return compact.query({view:'kitchen'});
+    if (view === 'menu') {
+      if (!menuId) throw new Error('menu requires menuId');
+      return compact.query({view:'menu',recipeId:menuId});
+    }
     if (view === 'recipes') {
       return compact.query({view:'recipes',memberId,recipeId,query:term,limit});
     }
@@ -105,8 +113,25 @@ export function createEverydayInterface(compact) {
       return compact.execute({memberId,operation:map[action],args:rest,includeContext:false});
     }
     if (operation === 'med') {
-      // The medicine cabinet: what is at home and the gap between doses. Doses taken come from statebar.
-      return compact.execute({memberId,operation:'med_save',args,includeContext:false});
+      // The medicine cabinet: what is at home and the gap between doses. Doses taken come from statebar;
+      // link/unlink only records what the user said a dose was FOR.
+      const {action='save', ...rest} = args;
+      const map = {save:'med_save', link:'dose_link', unlink:'dose_unlink'};
+      if (!Object.hasOwn(map, action)) throw new Error('med action must be save, link or unlink');
+      return compact.execute({memberId,operation:map[action],args:rest,includeContext:false});
+    }
+    if (operation === 'menu') {
+      // A menu is a DRAFT until confirmed; it never touches the pantry or anyone's ledger.
+      const map = {draft:'menu_draft', swap:'menu_swap', confirm:'menu_confirm', cooked:'menu_cooked', discard:'menu_discard'};
+      const {action, ...rest} = args;
+      if (!Object.hasOwn(map, action)) throw new Error('menu action must be draft, swap, confirm, cooked or discard');
+      return compact.execute({memberId,operation:map[action],args:rest,includeContext:false});
+    }
+    if (operation === 'kitchen_pref') {
+      const {action, ...rest} = args;
+      const map = {add:'kitchen_pref_add', remove:'kitchen_pref_remove'};
+      if (!Object.hasOwn(map, action)) throw new Error('kitchen_pref action must be add or remove');
+      return compact.execute({memberId,operation:map[action],args:rest,includeContext:false});
     }
     if (operation === 'health') {
       // Household clinical/symptom observations remain specialist facts,
