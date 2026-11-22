@@ -480,7 +480,7 @@
     const fmt = (v) => Number(v).toLocaleString("en-US");
     const kg = (v, d = 2) => (v == null ? "—" : Number(v).toFixed(d));
     const dash = (v) => (v == null ? "—" : v);
-    const kcalOf = (m) => Math.round(m.p * 4 + m.c * 4 + m.f * 9);
+    const kcalOf = (m) => Math.round(m.kcal ?? (m.p * 4 + m.c * 4 + m.f * 9)); // label energy when the row has it
     const time = (iso) => new Date(iso).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
 
     function toast(msg) {

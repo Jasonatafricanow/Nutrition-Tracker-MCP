@@ -17,7 +17,7 @@ const OPERATIONS = Object.freeze({
   template_save:'save_meal_template', template_log:'log_meal_template',
   supplement:'update_supplement_stack', plan:'set_day_context', profile:'set_profile',
   intake_complete:'mark_intake_complete', food_add:'add_food_to_library',
-  recipe_save:'save_recipe', plan_set:'set_meal_plan', plan_remove:'remove_plan_entry', plan_log:'log_plan_entry', food_add_checked:'add_checked_food'
+  recipe_save:'save_recipe', plan_set:'set_meal_plan', plan_remove:'remove_plan_entry', plan_log:'log_plan_entry', food_add_checked:'add_checked_food', food_add_label:'add_label_food'
 });
 const RESTRICTED = new Set(['get_snapshot','get_agent_context','get_meal_history','get_meal_corrections','get_photo_meal_draft','get_photo_estimation_protocol','search_foods','list_meal_templates','export_nutrition_data','list_recipes','get_meal_plan','get_shopping_list']);
 const clean = v=>Object.fromEntries(Object.entries(v).filter(([,x])=>x!==null&&x!==undefined));
@@ -115,7 +115,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      }
      const call=forMember(memberId);return {ok:true,source:'local',results:inputs.map(q=>{
        const v=call('search_foods',{query:q,limit:Math.min(limit,5)});
-       return {query:q,foods:v.foods.map(({id,name,p,c,f})=>({id,name,p,c,f}))};
+       return {query:q,foods:v.foods};
      })};
    }
    const call=forMember(memberId);
@@ -176,6 +176,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
    if(!name||!TOOL_DEFS[name]||RESTRICTED.has(name))throw Error('unsupported write operation');
    // Delegate schema validation, business rules, idempotency and transaction boundaries.
    const result=forMember(memberId)(name,args);
+   if(name==='add_label_food'&&household&&result.ok)household.shareLabelFoods(memberId);
    return afterWrite(result);
  }
  return {query,execute,projectHousehold};

@@ -453,6 +453,25 @@ export const TOOL_DEFS = {
       requestId: z.string().trim().min(1).max(128)
     }
   },
+  add_label_food: {
+    description: "按包装营养成分表录入一款预包装食品（全家共用）。热量用标签能量（kJ ÷ 4.184），不用三大营养素反算。同条码或同品牌/品名/规格/净含量的已有条目直接返回，不重复新增。看不清的标签不要录。",
+    shape: {
+      name: z.string().trim().min(1).max(40).describe("品名，如 红烧牛肉面"),
+      brand: z.string().trim().min(1).max(30).describe("品牌，如 康师傅"),
+      variant: z.string().trim().max(30).default("").describe("口味或款式，如 大食袋；没有就留空"),
+      aliases: z.array(z.string().trim().min(1).max(20)).max(6).default([]).describe("家里怎么叫它，如 大盒面"),
+      unit: z.enum(["g", "ml"]).default("g").describe("标签计量单位：固体 g，饮料 ml"),
+      netAmount: z.number().positive().max(10000).optional().describe("整包净含量（按 unit），如 115"),
+      basis: z.enum(["per100", "perServing"]).default("per100").describe("营养表是每 100g/100mL 还是每份"),
+      servingAmount: z.number().positive().max(5000).optional().describe("basis=perServing 时每份多少 g 或 mL"),
+      energyKj: z.number().positive().max(5000).optional().describe("标签上的能量（kJ），按 basis"),
+      energyKcal: z.number().positive().max(1200).optional().describe("标签只写 kcal 时用这个"),
+      p: z.number().min(0).max(100), c: z.number().min(0).max(100), f: z.number().min(0).max(100),
+      barcode: z.string().trim().regex(/^\d{8,14}$/).optional(),
+      source: z.string().trim().min(2).max(120).default("包装营养成分表"),
+      requestId: z.string().trim().min(1).max(128)
+    }
+  },
   update_supplement_stack: {
     description: "打卡今日补剂，或修改今日剂量说明",
     shape: {
@@ -697,7 +716,11 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
 
   for (const [table, columns] of Object.entries({
     daily_ledger: [["intake_complete", "INTEGER NOT NULL DEFAULT 0"], ["hrv_metric", "TEXT"], ["weight_measured_at", "TEXT"]],
-    meal_logs: [["source_kind", "TEXT"], ["source_ref", "TEXT"], ["portion_source", "TEXT"], ["revision", "INTEGER NOT NULL DEFAULT 0"]],
+    meal_logs: [["source_kind", "TEXT"], ["source_ref", "TEXT"], ["portion_source", "TEXT"], ["revision", "INTEGER NOT NULL DEFAULT 0"],
+      ["kcal", "REAL"]],
+    // kcal per 100 g/mL from a package label; NULL = 4/4/9 from the macros. A meal row keeps the kcal it was booked with.
+    foods: [["kcal", "REAL"]],
+    meal_template_items: [["kcal", "REAL"]],
     photo_meal_drafts: [["confirmation_evidence_json", "TEXT"]],
     tdee_calibrations: [["evidence_hash", "TEXT"], ["last_observation_date", "TEXT"]],
     health_ingest_events: [["payload_hash", "TEXT"]]
@@ -707,6 +730,13 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       if (!have.has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
     }
   }
+
+  db.exec(`CREATE TABLE IF NOT EXISTS food_labels (
+    food_id TEXT PRIMARY KEY REFERENCES foods(id), brand TEXT NOT NULL, product TEXT NOT NULL, variant TEXT NOT NULL,
+    aliases_json TEXT NOT NULL, unit TEXT NOT NULL, net_amount REAL, basis TEXT NOT NULL, serving_amount REAL,
+    energy_kj REAL, energy_kcal REAL, barcode TEXT, source TEXT NOT NULL, created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_food_labels_barcode ON food_labels(barcode);`);
 
   const tx = (fn) => {
     db.exec("BEGIN IMMEDIATE");
@@ -836,9 +866,44 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
   }
 
   function recalcIntake(date) {
-    const s = q("SELECT COALESCE(SUM(p),0) AS p, COALESCE(SUM(c),0) AS c, COALESCE(SUM(f),0) AS f FROM meal_logs WHERE date = ?").get(date);
+    const s = q(`SELECT COALESCE(SUM(p),0) AS p, COALESCE(SUM(c),0) AS c, COALESCE(SUM(f),0) AS f,
+      COALESCE(SUM(COALESCE(kcal, p*4 + c*4 + f*9)),0) AS k FROM meal_logs WHERE date = ?`).get(date);
     q("UPDATE daily_ledger SET intake_kcal = ?, p_g = ?, c_g = ?, f_g = ?, intake_complete = 0 WHERE date = ?")
-      .run(kcalOf(s.p, s.c, s.f), round1(s.p), round1(s.c), round1(s.f), date);
+      .run(Math.round(s.k), round1(s.p), round1(s.c), round1(s.f), date);
+  }
+
+  // What `amount` g (or mL) of a library food holds. kcal is the label energy when the food has one, else null
+  // (the ledger then counts 4/4/9).
+  function portionOf(food, amount) {
+    const k = amount / 100;
+    const out = { p: round1(food.p * k), c: round1(food.c * k), f: round1(food.f * k) };
+    return food.kcal == null ? out : { ...out, kcal: round1(food.kcal * k) };
+  }
+
+  // A library food as agents see it: per 100 g (or mL for a drink label), and label facts when it came from a package.
+  function foodRow(r) {
+    const out = { id: r.id, name: r.name, p: r.p, c: r.c, f: r.f, kcal: Math.round(r.kcal ?? kcalOf(r.p, r.c, r.f)) };
+    if (r.brand == null) return out;
+    return { ...out, unit: r.unit, kcalFrom: "label", label: { brand: r.brand, netAmount: r.net_amount, basis: r.basis,
+      barcode: r.barcode, aliases: JSON.parse(r.aliases_json || "[]") } };
+  }
+  // Package-label foods are the household's, like the fridge: the same rows (same foodId) go into every member's library.
+  function labelFoods() {
+    return q("SELECT f.id,f.name,f.p,f.c,f.f,f.kcal,f.created_at,l.* FROM foods f JOIN food_labels l ON l.food_id=f.id").all();
+  }
+  function importLabelFoods(rows) {
+    let added = 0;
+    tx(() => {
+      for (const r of rows) {
+        if (q("SELECT 1 FROM foods WHERE id=?").get(r.id)) continue;
+        q("INSERT INTO foods (id, name, p, c, f, kcal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(r.id, r.name, r.p, r.c, r.f, r.kcal, r.created_at);
+        q(`INSERT OR IGNORE INTO food_labels (food_id,brand,product,variant,aliases_json,unit,net_amount,basis,serving_amount,energy_kj,energy_kcal,barcode,source,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(r.id, r.brand, r.product, r.variant, r.aliases_json, r.unit, r.net_amount, r.basis,
+          r.serving_amount, r.energy_kj, r.energy_kcal, r.barcode, r.source, r.created_at);
+        added++;
+      }
+    });
+    return added;
   }
 
   // Agent writes can be retried by MCP hosts. Receipts and meal rows are committed
@@ -856,12 +921,12 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       }
       beforeCommit?.();
       ensureLedger(date);
-      const ins = q("INSERT INTO meal_logs (id, date, slot, name, weight_g, p, c, f, created_at, source_kind, source_ref, portion_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      const ins = q("INSERT INTO meal_logs (id, date, slot, name, weight_g, p, c, f, created_at, source_kind, source_ref, portion_source, kcal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
       const ids = [];
       for (const r of rows) {
         if (r.p + r.c + r.f > r.w * 1.001) throw new ToolError("营养素总质量不能超过食物份量");
         const id = "m_" + randomUUID();
-        ins.run(id,date,slot,r.name,r.w,r.p,r.c,r.f,nowIso(),r.sourceKind??null,r.sourceRef??null,r.portionSource??null);
+        ins.run(id,date,slot,r.name,r.w,r.p,r.c,r.f,nowIso(),r.sourceKind??null,r.sourceRef??null,r.portionSource??null,r.kcal??null);
         ids.push(id);
       }
       afterInsert?.(ids);
@@ -878,13 +943,11 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
     const candidates=JSON.parse(raw.candidates_json);
     const estimate=raw.compiled_estimate_json?JSON.parse(raw.compiled_estimate_json):null;
     const items=candidates.map((item,index)=>{
-      const food=item.foodId?q("SELECT id,name,p,c,f FROM foods WHERE id=?").get(item.foodId):null;
+      const food=item.foodId?q("SELECT id,name,p,c,f,kcal FROM foods WHERE id=?").get(item.foodId):null;
       const grams=item.estimatedWeightGrams;
+      const est=food && grams!=null?portionOf(food,grams):null;
       return {index,...item,needsFoodMatch:!food,foodMatch:food??null,
-        estimated:food && grams!=null?{
-          p:round1(food.p*grams/100),c:round1(food.c*grams/100),f:round1(food.f*grams/100),
-          kcal:kcalOf(food.p*grams/100,food.c*grams/100,food.f*grams/100)
-        }:{} };
+        estimated:est?{...est,kcal:Math.round(est.kcal??kcalOf(est.p,est.c,est.f))}:{} };
     });
     return {ok:true,draftId:raw.id,date:raw.date,mealSlot:raw.slot,status:raw.status,
       confirmationEvidence:raw.confirmation_evidence_json?JSON.parse(raw.confirmation_evidence_json):null,
@@ -1006,17 +1069,19 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
   const macroOf = (p, c, f) => ({ kcal: kcalOf(p, c, f), p: round1(p), c: round1(c), f: round1(f) });
   function recipeView(id) {
     const r = q("SELECT * FROM recipes WHERE id=?").get(id);
-    const items = q(`SELECT i.food_id,i.name,i.weight_g,f.p,f.c,f.f FROM recipe_items i JOIN foods f ON f.id=i.food_id
+    const items = q(`SELECT i.food_id,i.name,i.weight_g,f.p,f.c,f.f,f.kcal FROM recipe_items i JOIN foods f ON f.id=i.food_id
       WHERE i.recipe_id=? ORDER BY i.position`).all(id);
-    let P = 0, C = 0, F = 0, W = 0;
+    let P = 0, C = 0, F = 0, K = 0, W = 0;
     const view = items.map((i) => {
-      const k = i.weight_g / 100; P += i.p * k; C += i.c * k; F += i.f * k; W += i.weight_g;
-      return { foodId: i.food_id, name: i.name, weightGrams: i.weight_g, perServingGrams: round1(i.weight_g / r.servings), ...macroOf(i.p * k, i.c * k, i.f * k) };
+      const k = i.weight_g / 100, kcal = i.kcal != null ? i.kcal * k : (i.p * 4 + i.c * 4 + i.f * 9) * k;
+      P += i.p * k; C += i.c * k; F += i.f * k; K += kcal; W += i.weight_g;
+      return { foodId: i.food_id, name: i.name, weightGrams: i.weight_g, perServingGrams: round1(i.weight_g / r.servings),
+        ...macroOf(i.p * k, i.c * k, i.f * k), kcal: Math.round(kcal) };
     });
     const s = r.servings;
     return { recipeId: r.id, name: r.name, servings: s, note: r.note, steps: r.steps_json ? JSON.parse(r.steps_json) : [],
-      total: { grams: round1(W), ...macroOf(P, C, F) },
-      perServing: { grams: round1(W / s), ...macroOf(P / s, C / s, F / s) },
+      total: { grams: round1(W), ...macroOf(P, C, F), kcal: Math.round(K) },
+      perServing: { grams: round1(W / s), ...macroOf(P / s, C / s, F / s), kcal: Math.round(K / s) },
       items: view, updatedAt: r.updated_at };
   }
   function checkPlanDate(date) {
@@ -1130,8 +1195,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         if(foodId){
           const food=q("SELECT * FROM foods WHERE id=?").get(foodId);
           if(!food)throw new ToolError(`不存在食物库 ID: ${foodId}`);
-          const scale=d.weightGrams/100;
-          macros={p:round1(food.p*scale),c:round1(food.c*scale),f:round1(food.f*scale)};
+          macros=portionOf(food,d.weightGrams);
         }else{
           if(!d.nutritionSource||d.p==null||d.c==null||d.f==null)
             throw new ToolError("没有匹配食材库时，必须提供可核实的 nutritionSource 及 p/c/f；不能从照片想象营养值");
@@ -1360,11 +1424,10 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       const rows=a.items.map(it=>{
         let macros;
         if(it.foodId){
-          const food=q("SELECT id,name,p,c,f FROM foods WHERE id=?").get(it.foodId);
+          const food=q("SELECT id,name,p,c,f,kcal FROM foods WHERE id=?").get(it.foodId);
           if(!food)throw new ToolError("没有匹配的食材库 ID");
           if(it.p!=null||it.c!=null||it.f!=null)throw new ToolError("匹配食材库时不要混入独立估算营养值");
-          const factor=it.weightGrams/100;
-          macros={p:round1(food.p*factor),c:round1(food.c*factor),f:round1(food.f*factor)};
+          macros=portionOf(food,it.weightGrams);
         }else{
           if([it.p,it.c,it.f].some(x=>x==null))throw new ToolError("无 foodId 时需要完整的估算 p/c/f");
           macros={p:it.p,c:it.c,f:it.f};
@@ -1384,8 +1447,7 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         if (it.foodId) {
           const food=q("SELECT * FROM foods WHERE id = ?").get(it.foodId);
           if (!food) throw new ToolError(`食材库里没有 ${it.foodId}`);
-          const k=it.weightGrams/100;
-          return {name:it.name||food.name,w:it.weightGrams,p:round1(food.p*k),c:round1(food.c*k),f:round1(food.f*k)};
+          return {name:it.name||food.name,w:it.weightGrams,...portionOf(food,it.weightGrams)};
         }
         if (!it.name || it.p==null || it.c==null || it.f==null) throw new ToolError("没有 foodId 的条目必须给 name、p、c、f");
         return {name:it.name,w:it.weightGrams,p:it.p,c:it.c,f:it.f};
@@ -1396,8 +1458,11 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
 
     search_foods(a) {
       const escaped=a.query.trim().replace(/[\\%_]/g,ch=>"\\"+ch);
-      const rows=q("SELECT id,name,p,c,f FROM foods WHERE name LIKE ? ESCAPE '\\' ORDER BY CASE WHEN name LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END, name LIMIT ?")
-        .all(`%${escaped}%`,`${escaped}%`,a.limit);
+      const rows=q(`SELECT f.id,f.name,f.p,f.c,f.f,f.kcal,l.brand,l.unit,l.net_amount,l.basis,l.barcode,l.aliases_json FROM foods f
+        LEFT JOIN food_labels l ON l.food_id=f.id
+        WHERE f.name LIKE ? ESCAPE '\\' OR l.aliases_json LIKE ? ESCAPE '\\'
+        ORDER BY CASE WHEN f.name LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END, f.name LIMIT ?`)
+        .all(`%${escaped}%`,`%${escaped}%`,`${escaped}%`,a.limit).map(foodRow);
       return {result:{ok:true,query:a.query,foods:rows},summary:null};
     },
 
@@ -1405,20 +1470,21 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       const date=a.date??today();
       if (date>today()) throw new ToolError("不能查询未来业务日期");
       const ledger=getRow(date)??null;
-      const rows=q("SELECT id,slot,name,weight_g,p,c,f,created_at,source_kind,source_ref,portion_source,revision FROM meal_logs WHERE date=? ORDER BY created_at,id").all(date);
+      const rows=q("SELECT id,slot,name,weight_g,p,c,f,kcal,created_at,source_kind,source_ref,portion_source,revision FROM meal_logs WHERE date=? ORDER BY created_at,id").all(date)
+        .map(r=>({...r,kcal:Math.round(r.kcal??kcalOf(r.p,r.c,r.f))}));
       return {result:{ok:true,date,intakeComplete:!!ledger?.intake_complete,intakeKcal:ledger?.intake_kcal??0,proteinG:ledger?.p_g??0,carbG:ledger?.c_g??0,fatG:ledger?.f_g??0,meals:rows},summary:null};
     },
 
     save_meal_template(a) {
       const date=a.date??today();
       if (date>today()) throw new ToolError("不能从未来日期保存模板");
-      const meals=q("SELECT name,weight_g,p,c,f FROM meal_logs WHERE date=? AND slot=? ORDER BY created_at,id").all(date,a.mealSlot);
+      const meals=q("SELECT name,weight_g,p,c,f,kcal FROM meal_logs WHERE date=? AND slot=? ORDER BY created_at,id").all(date,a.mealSlot);
       if (!meals.length) throw new ToolError("该日期/餐次没有食物记录，无法保存模板");
       const id="tmpl_"+randomUUID();
       tx(()=>{
         q("INSERT INTO meal_templates(id,name,source_date,source_slot,created_at) VALUES (?,?,?,?,?)").run(id,a.name,date,a.mealSlot,nowIso());
-        const ins=q("INSERT INTO meal_template_items(template_id,position,name,weight_g,p,c,f) VALUES (?,?,?,?,?,?,?)");
-        meals.forEach((r,i)=>ins.run(id,i,r.name,r.weight_g,r.p,r.c,r.f));
+        const ins=q("INSERT INTO meal_template_items(template_id,position,name,weight_g,p,c,f,kcal) VALUES (?,?,?,?,?,?,?,?)");
+        meals.forEach((r,i)=>ins.run(id,i,r.name,r.weight_g,r.p,r.c,r.f,r.kcal??null));
       });
       return {result:{ok:true,templateId:id,name:a.name,sourceDate:date,mealSlot:a.mealSlot,items:meals},summary:`模板「${a.name}」保存于 ${date} ${a.mealSlot}`};
     },
@@ -1435,7 +1501,8 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       if (!template) throw new ToolError("不存在该餐食模板");
       const rows=q("SELECT * FROM meal_template_items WHERE template_id=? ORDER BY position").all(template.id);
       if (!rows.length) throw new ToolError("餐食模板为空");
-      const resolved=rows.map(r=>({name:r.name,w:round1(r.weight_g*a.multiplier),p:round1(r.p*a.multiplier),c:round1(r.c*a.multiplier),f:round1(r.f*a.multiplier)}));
+      const resolved=rows.map(r=>({name:r.name,w:round1(r.weight_g*a.multiplier),p:round1(r.p*a.multiplier),c:round1(r.c*a.multiplier),f:round1(r.f*a.multiplier),
+        kcal:r.kcal==null?null:round1(r.kcal*a.multiplier)}));
       const date=a.date??today(),slot=a.mealSlot??template.source_slot;
       const result=commitMeal({toolName:"log_meal_template",requestId:a.requestId,payload:a,date,slot,rows:resolved});
       return {result:{...result,templateId:template.id,templateName:template.name},summary:result.duplicate?null:`复用餐食「${template.name}」到 ${date} ${slot}`};
@@ -1468,13 +1535,12 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
         const hasAny=nutrients.some(x=>x!==undefined),hasAll=nutrients.every(x=>x!==undefined);
         if(hasAny && !hasAll)throw new ToolError("必须同时提供 p、c、f");
         if(a.foodId && hasAny)throw new ToolError("foodId 与显式营养值不能同时指定");
-        let name=a.name??before.name, p,c,f;
+        let name=a.name??before.name, p,c,f,kcal=null;
         if(a.foodId){
           const food=q("SELECT * FROM foods WHERE id=?").get(a.foodId);
           if(!food)throw new ToolError("食材库没有指定食物");
           name=a.name??food.name;
-          const ratio=a.weightGrams/100;
-          p=round1(food.p*ratio);c=round1(food.c*ratio);f=round1(food.f*ratio);
+          ({p,c,f,kcal}=portionOf(food,a.weightGrams));
         }else if(hasAll){
           // Without a stated source these are estimates, as with log_estimated_meal.
           p=a.p;c=a.c;f=a.f;
@@ -1483,12 +1549,13 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
           // Recalculate from stored snapshot, not mutable food catalog.
           const factor=a.weightGrams/before.weight_g;
           p=round1(before.p*factor);c=round1(before.c*factor);f=round1(before.f*factor);
+          kcal=before.kcal==null?null:round1(before.kcal*factor);
         }
         if(p+c+f>a.weightGrams*1.001)throw new ToolError("营养素总质量不能超过食物份量");
         const nowValue=nowIso();
-        const change=q(`UPDATE meal_logs SET name=?,weight_g=?,p=?,c=?,f=?,
+        const change=q(`UPDATE meal_logs SET name=?,weight_g=?,p=?,c=?,f=?,kcal=?,
           portion_source=COALESCE(?,portion_source),revision=revision+1 WHERE id=? AND revision=?`)
-          .run(name,a.weightGrams,p,c,f,a.portionSource??null,a.mealId,expected);
+          .run(name,a.weightGrams,p,c,f,kcal??null,a.portionSource??null,a.mealId,expected);
         if(change.changes!==1)throw new ToolError("餐食版本冲突");
         const after=q("SELECT * FROM meal_logs WHERE id=?").get(a.mealId);
         q("INSERT INTO meal_corrections(id,meal_id,request_id,changed_at,actor,before_json,after_json) VALUES (?,?,?,?,?,?,?)")
@@ -1552,6 +1619,42 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       const id = "custom_" + randomUUID();
       q("INSERT INTO foods (id, name, p, c, f, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, a.name, a.p, a.c, a.f, nowIso());
       return { result: { ok: true, foodId: id }, summary: `食材库新增：${a.name} (每100g P${a.p} C${a.c} F${a.f})` };
+    },
+
+    add_label_food(a, source) {
+      if ((a.energyKj == null) === (a.energyKcal == null)) throw new ToolError("energyKj 和 energyKcal 给一个：标签写 kJ 就用 energyKj");
+      if (a.basis === "perServing" && !a.servingAmount) throw new ToolError("每份营养表要给 servingAmount（每份多少 g 或 mL），否则没法折算");
+      const k = a.basis === "perServing" ? 100 / a.servingAmount : 1;
+      const per = { p: round1(a.p * k), c: round1(a.c * k), f: round1(a.f * k) };
+      const kcal = round1((a.energyKj != null ? a.energyKj / 4.184 : a.energyKcal) * k);
+      if (per.p + per.c + per.f > 100.01) throw new ToolError("折成每 100 后蛋白质、碳水、脂肪合计超过 100，营养表或每份规格看错了");
+      if (kcal > 900) throw new ToolError("折成每 100 后超过 900 kcal，能量单位或基准看错了");
+      const fromMacros = kcalOf(per.p, per.c, per.f);
+      // Only catches a misread (kcal typed as kJ, per-serving read as per-100), not ordinary label rounding.
+      if (fromMacros >= 30 && (kcal < fromMacros * 0.6 || kcal > fromMacros * 1.6))
+        throw new ToolError(`标签能量 ${Math.round(kcal)} kcal 和三大营养素算出的 ${fromMacros} kcal 差太多，可能把 kcal 当成 kJ 或看错了基准；重新看一下标签`);
+      const key = (x) => (x ?? "").replace(/\s+/g, "").toLowerCase();
+      const out = withReceipt("add_label_food", a.requestId, a, () => {
+        const labels = q("SELECT l.*,f.name FROM food_labels l JOIN foods f ON f.id=l.food_id").all();
+        const same = labels.find((l) => a.barcode && l.barcode === a.barcode)
+          ?? labels.find((l) => key(l.brand) === key(a.brand) && key(l.product) === key(a.name) && key(l.variant) === key(a.variant)
+            && l.unit === a.unit && (l.net_amount ?? null) === (a.netAmount ?? null));
+        if (same) return { ok: true, added: false, reason: "duplicate", existing: foodRow(q(`SELECT f.*,l.brand,l.unit,l.net_amount,l.basis,l.barcode,l.aliases_json
+          FROM foods f JOIN food_labels l ON l.food_id=f.id WHERE f.id=?`).get(same.food_id)), instruction: "库里已有这一款，直接用它的 foodId。" };
+        const otherSpecs = labels.filter((l) => key(l.brand) === key(a.brand) && key(l.product) === key(a.name))
+          .map((l) => ({ foodId: l.food_id, name: l.name }));
+        const net = a.netAmount ? ` ${a.netAmount}${a.unit === "ml" ? "mL" : "g"}` : "";
+        const display = `${a.brand}${a.name}${a.variant ? " " + a.variant : ""}${net}`;
+        const id = "label_" + randomUUID(), at = nowIso();
+        q("INSERT INTO foods (id, name, p, c, f, kcal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, display, per.p, per.c, per.f, kcal, at);
+        q(`INSERT INTO food_labels (food_id,brand,product,variant,aliases_json,unit,net_amount,basis,serving_amount,energy_kj,energy_kcal,barcode,source,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, a.brand, a.name, a.variant, JSON.stringify(a.aliases), a.unit, a.netAmount ?? null, a.basis,
+          a.servingAmount ?? null, a.energyKj ?? null, a.energyKcal ?? null, a.barcode ?? null, a.source, at);
+        journal(source, "add_label_food", { foodId: id, ...a }, `录入包装食品：${display}（每100${a.unit} ${Math.round(kcal)} kcal）`);
+        return { ok: true, added: true, food: foodRow({ id, name: display, ...per, kcal, brand: a.brand, unit: a.unit, net_amount: a.netAmount ?? null,
+          basis: a.basis, barcode: a.barcode ?? null, aliases_json: JSON.stringify(a.aliases) }), otherSpecs };
+      });
+      return { result: out, summary: null };
     },
 
     add_checked_food(a, source) {
@@ -1695,11 +1798,11 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
       if(e.logged_at && e.logged_request_id!==a.requestId)throw new ToolError("该计划项已经记入账本，不能重复入账");
       const recipe=q("SELECT * FROM recipes WHERE id=?").get(e.recipe_id);
       const servings=a.servings??e.servings;
-      const items=q(`SELECT i.*,f.p,f.c,f.f FROM recipe_items i JOIN foods f ON f.id=i.food_id WHERE i.recipe_id=? ORDER BY position`).all(recipe.id);
+      const items=q(`SELECT i.*,f.p,f.c,f.f,f.kcal FROM recipe_items i JOIN foods f ON f.id=i.food_id WHERE i.recipe_id=? ORDER BY position`).all(recipe.id);
       if(!items.length)throw new ToolError("菜谱没有原料");
       const rows=items.map(i=>{
-        const w=round1(i.weight_g/recipe.servings*servings), k=w/100;
-        return {name:i.name,w,p:round1(i.p*k),c:round1(i.c*k),f:round1(i.f*k),
+        const w=round1(i.weight_g/recipe.servings*servings);
+        return {name:i.name,w,...portionOf(i,w),
           sourceKind:"recipe_plan",sourceRef:`${e.id}|${recipe.id}`,portionSource:"recipe_per_serving"};
       });
       const result=commitMeal({toolName:"log_plan_entry",requestId:a.requestId,payload:a,date:e.date,slot:e.slot,rows,
@@ -1814,6 +1917,8 @@ export function createEngine(dbPath, { demo = false, now = () => new Date(), tim
   return {
     execute,
     buildSnapshot,
+    labelFoods,
+    importLabelFoods,
     dataVersion: () => q("PRAGMA data_version").get().data_version,
     close: () => db.close()
   };

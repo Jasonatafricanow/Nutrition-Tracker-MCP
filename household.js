@@ -65,8 +65,20 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
   const member=id=>{const m=byId.get(id);if(!m)throw Error('unknown memberId');return m;};
   const memberEngine=id=>{
     const m=member(id);
-    if(!engines.has(id))engines.set(id,engineFactory(path.join(dir,`nutrition-${id}.db`),{timeZone:m.timeZone,now}));
+    if(!engines.has(id)){
+      const e=engineFactory(path.join(dir,`nutrition-${id}.db`),{timeZone:m.timeZone,now});
+      // Package-label foods belong to the household: a member opened later still finds every one already recorded.
+      if(primaryEngine?.labelFoods&&e.importLabelFoods)e.importLabelFoods(primaryEngine.labelFoods());
+      engines.set(id,e);
+    }
     return engines.get(id);
+  };
+  // After a label food is recorded for one member, the same rows (same foodId) go into everyone's library.
+  const shareLabelFoods=fromId=>{
+    const rows=memberEngine(fromId).labelFoods?.()??[];
+    let added=0;
+    for(const m of members)if(m.id!==fromId)added+=memberEngine(m.id).importLabelFoods?.(rows)??0;
+    return added;
   };
   const memberTool=(memberId,tool,args={},source=`HOUSEHOLD:${memberId}`)=>{
     if(typeof tool!=='string'||tool==='get_household_context')throw Error('invalid nutrition tool');
@@ -161,6 +173,6 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
     database.prepare('INSERT INTO mentions VALUES(?,?,?) ON CONFLICT(member_id,signal) DO UPDATE SET last_date=excluded.last_date').run(memberId,signal,day);
     return {ok:true,memberId,signal,lastMentioned:day};
   };
-  return {members,primary,member,memberTool,logObservation,observations,context,acknowledge,stock,
+  return {members,primary,member,memberTool,logObservation,observations,context,acknowledge,stock,shareLabelFoods,
     close(){for(const [id,e] of engines)if(id!==primary)e.close();database.close();}};
 }

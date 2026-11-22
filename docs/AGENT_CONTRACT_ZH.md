@@ -48,6 +48,7 @@ nutrition_query({view:"foods",memberId:"adult_a",queries:["熟米饭","鸡胸肉
 | `plan_set` | 把菜谱排进某天某餐 | `date`、`mealSlot`、`recipeId`、`servings`、`replace?`；可排未来日期，不入账 |
 | `plan_remove` | 删除一条未入账计划项 | `entryId`；不影响账本 |
 | `food_add` | 库里确实没有的食材 | `name`、`aliases?`、`state`（raw/cooked/as_sold）、每100g `p/c/f`、`dataSource`、`requestId`；服务端先查近似条目，有候选就拒绝并返回；逐一核对后带 `reviewedCandidateIds`+`confirmDistinct:true` 才新增；每日上限 10 条 |
+| `food_add`（标签） | 用户给了包装营养成分表（新拍或旧照片） | `label`={`brand`,`name`,`variant?`,`aliases?`,`netAmount?`,`unit` g/ml,`basis` per100/perServing,`servingAmount?`,`energyKj`（按标签原样）,`p/c/f`,`barcode?`}、`requestId`；记账热量用标签能量（kJ÷4.184），不再按三大营养素反算；全家共用同一个 `foodId`，摄入仍各记各的；同条码或同品牌/品名/款式/净含量直接返回已有条目；能量和三大营养素差太多（多半 kcal 当 kJ 或看错基准）会拒绝。识别标签≠吃过，也不进冰箱 |
 | `pantry` | 冰箱：买了什么（小票或口述）、做菜用了、扔了、改一条 | `action`=add/use/discard/edit；add 带 `items:[{name,quantity,shelfLifeDays?|expiresOn?}]`、`source`；use 带 `name`/`itemId` 和 `remaining`（原话，空=用完）。数量照说的记，不求精确 |
 | `med` | 家里药箱登记一种药 | `name`、`aliases?`、`forMembers?`、`dose`、`minIntervalHours?`、`maxPerDay?`；**吃了药不在这里写**，经状态块进 statebar |
 | `plan_log` | 用户说吃了计划里的一餐 | `entryId`、`requestId`、`servings?`（实际份数）；按每份克数拆原料入账，未来日期拒绝 |

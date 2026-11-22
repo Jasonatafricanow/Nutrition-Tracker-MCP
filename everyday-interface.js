@@ -143,6 +143,11 @@ export function createEverydayInterface(compact) {
       if (!args.entryId || !args.requestId) throw new Error('plan_log requires entryId and requestId');
       return compact.execute({memberId,operation:'plan_log',args,includeContext});
     }
+    if (operation === 'food_add' && args.label) {
+      // A package nutrition label: kcal comes from the label energy, the food is shared by the household.
+      if (!args.requestId) throw new Error('food_add with label requires requestId');
+      return compact.execute({memberId,operation:'food_add_label',args:{...args.label,requestId:args.requestId},includeContext:false});
+    }
     if (operation === 'food_add') {
       // Guarded library growth: the engine searches for similar foods first and
       // refuses until every candidate was reviewed and declared distinct.
