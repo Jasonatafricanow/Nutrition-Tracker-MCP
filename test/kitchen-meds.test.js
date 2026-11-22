@@ -134,8 +134,63 @@ test('a broken dish writes nothing; confirm and cooked keep the ledger and fridg
   const done=f.x('owner','menu',{action:'cooked',menuId:r.menuId,requestId:'c-2'});
   assert.equal(done.status,'cooked');
   assert.equal((await meals(f,'owner')).length,0,'cooking books nobody');
-  assert.equal((await f.api.query({view:'pantry'})).items.find(i=>i.name==='排骨').quantity,'500g','cooking moves the fridge only via pantry use');
+  const ribs=(await f.api.query({view:'pantry'})).items.find(i=>i.name==='排骨');
+  assert.equal(ribs.quantity,'500g（做红烧排骨用过，剩多少待确认）','no amount on the dish: unknown, not zero, not a guess');
+  assert.ok(done.pantry.toCheck.some(x=>x.name==='排骨'));
   assert.ok((await f.api.query({view:'kitchen'})).recentDishes.some(d=>d.name==='红烧排骨'&&d.from==='menu'));
+ }finally{f.close();}
+});
+
+test('cooked: the dishes made take what they used out of the fridge, once; dishes not made take nothing',async()=>{
+ const f=fixture();
+ try{
+  f.x('owner','pantry',{action:'add',requestId:'s-1',items:[{name:'排骨',quantity:'1斤'},{name:'五花肉',quantity:'300g'},{name:'鸡蛋',quantity:'10个'},
+   {name:'青椒',quantity:'3个'},{name:'西兰花',quantity:'1颗'}]});
+  const amt=(n,a)=>({name:n,amount:a});
+  const r=f.x('owner','menu',{action:'draft',requestId:'m-1',dishes:[
+   dish('红烧排骨','荤',[amt('排骨','300g'),amt('生抽','2勺')],40),dish('青椒炒肉片','荤',[amt('五花肉','300克'),amt('青椒','2个')],8),
+   dish('番茄炒蛋','荤',[amt('鸡蛋','3个'),amt('番茄','2个')],5),dish('蒜蓉西兰花','素',[amt('西兰花','一把')],5)]});
+  const id=n=>r.dishes.find(d=>d.name===n).id;
+  // "今天做了排骨、青椒肉片和西兰花" — not the eggs.
+  const c=f.x('owner','menu',{action:'cooked',menuId:r.menuId,dishIds:[id('红烧排骨'),id('青椒炒肉片'),id('蒜蓉西兰花')],requestId:'c-1',by:'tester'});
+  const p=Object.fromEntries((await f.api.query({view:'pantry'})).items.map(i=>[i.name,i.quantity]));
+  assert.equal(p['排骨'],'200g','1斤 − 300g');
+  assert.equal(p['五花肉'],undefined,'300g − 300克 = used up');
+  assert.equal(p['青椒'],'1个');
+  assert.equal(p['鸡蛋'],'10个','the eggs were not cooked');
+  assert.match(p['西兰花'],/待确认/,'一把 of 1颗 cannot be subtracted');
+  assert.deepEqual(c.pantry.usedUp.map(x=>x.name),['五花肉']);
+  assert.ok(!(await f.api.query({view:'kitchen'})).recentDishes.some(d=>d.name==='番茄炒蛋'),'not made, not a recent dish');
+  assert.equal(f.x('owner','menu',{action:'cooked',menuId:r.menuId,requestId:'c-1'}).duplicate,true);
+  assert.equal((await f.api.query({view:'pantry'})).items.find(i=>i.name==='排骨').quantity,'200g','a retry takes nothing twice');
+  // Cooked without a menu, from a sentence.
+  f.x('owner','menu',{action:'cooked',requestId:'c-2',dishes:[dish('蒸蛋','荤',[amt('鸡蛋','2个')],10)]});
+  assert.equal((await f.api.query({view:'pantry'})).items.find(i=>i.name==='鸡蛋').quantity,'8个');
+  assert.equal((await meals(f,'owner')).length,0,'cooking books nobody');
+ }finally{f.close();}
+});
+
+test('cookbook: a dish the user approved is kept, comes back whole in a later menu, and counts when cooked',async()=>{
+ const f=fixture();
+ try{
+  const r=f.x('owner','menu',{action:'draft',requestId:'m-1',dishes:[dish('可乐鸡翅','荤',[{name:'鸡翅',amount:'500g'},{name:'可乐',amount:'1罐'}],25,{steps:['焯水','煎到两面金黄','加可乐收汁']})]});
+  const s=f.x('owner','kitchen_recipe',{action:'save',menuId:r.menuId,dishId:'d1',requestId:'kr-1'});
+  assert.equal(s.recipe.name,'可乐鸡翅');
+  assert.deepEqual(s.recipe.steps,['焯水','煎到两面金黄','加可乐收汁']);
+  assert.throws(()=>f.x('owner','kitchen_recipe',{action:'save',menuId:r.menuId,dishId:'d1',requestId:'kr-2'}),/已有同名菜谱/);
+  const book=await f.api.query({view:'cookbook'});
+  assert.equal(book.count,1);
+  assert.deepEqual((await f.api.query({view:'kitchen'})).cookbook.map(x=>x.name),['可乐鸡翅']);
+  const m2=f.x('owner','menu',{action:'draft',requestId:'m-2',dishes:[{fromRecipe:s.recipe.recipeId,cookMin:30}]});
+  assert.equal(m2.dishes[0].heat,'中火');
+  assert.equal(m2.dishes[0].cookMin,30,'a field given next to fromRecipe overrides it');
+  f.x('owner','menu',{action:'cooked',menuId:m2.menuId,requestId:'c-1'});
+  const one=await f.api.query({view:'cookbook',recipeId:s.recipe.recipeId});
+  assert.equal(one.recipe.timesCooked,1);
+  const changed=f.x('owner','kitchen_recipe',{action:'save',recipeId:s.recipe.recipeId,dish:{...dish('可乐鸡翅','荤',[{name:'鸡翅'}],20)},requestId:'kr-3'});
+  assert.equal(changed.updated,true);
+  f.x('owner','kitchen_recipe',{action:'remove',recipeId:s.recipe.recipeId,requestId:'kr-4'});
+  assert.equal((await f.api.query({view:'cookbook'})).count,0);
  }finally{f.close();}
 });
 

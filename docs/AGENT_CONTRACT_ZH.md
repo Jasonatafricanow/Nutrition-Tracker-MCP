@@ -25,6 +25,7 @@
 | `timeline` | 每人的症状和服药按时间并排 | `memberId?`（只看这一位）、`days?`（默认 7）；症状和服药都来自状态块 → statebar；`forSymptom` 只有用户明确说过的关联，时间挨得近不算 |
 | `kitchen` | 排菜单前看家里：冰箱、最近用完的、近 7 天吃过的菜、家里说过的偏好、没做完的菜单 | 冰箱里没记的是「不知道」，不是「没有」 |
 | `menu` | 一个菜单的全貌 | `menuId`；菜、缺料（要买 / 先查家里 / 家里有）、备料和开火顺序、提醒 |
+| `cookbook` | 家里的菜谱：认可过、要留下的菜 | `recipeId?`（看一道）、`query?`；排菜单时用 `{fromRecipe: recipeId}` 整道拿来；和按食品库克数算营养的 `recipes` 是两回事 |
 
 示例（指定家庭成员时须有已知 `memberId`）：
 
@@ -54,7 +55,8 @@ nutrition_query({view:"foods",memberId:"adult_a",queries:["熟米饭","鸡胸肉
 | `food_add`（标签） | 用户给了包装营养成分表（新拍或旧照片） | `label`={`brand`,`name`,`variant?`,`aliases?`,`netAmount?`,`unit` g/ml,`basis` per100/perServing,`servingAmount?`,`energyKj`（按标签原样）,`p/c/f`,`barcode?`}、`requestId`；记账热量用标签能量（kJ÷4.184），不再按三大营养素反算；全家共用同一个 `foodId`，摄入仍各记各的；同条码或同品牌/品名/款式/净含量直接返回已有条目；能量和三大营养素差太多（多半 kcal 当 kJ 或看错基准）会拒绝。识别标签≠吃过，也不进冰箱 |
 | `pantry` | 冰箱：买了什么（小票或口述）、做菜用了、扔了、改一条 | `action`=add/use/discard/edit；add 带 `items:[{name,quantity,shelfLifeDays?|expiresOn?}]`、`source`；use 带 `name`/`itemId` 和 `remaining`（原话，空=用完）。数量照说的记，不求精确 |
 | `med` | 家里药箱登记一种药；或记下用户说的「这次药是因为那个症状吃的」 | 默认 `action`=save：`name`、`aliases?`、`ingredient?`（成分）、`strength?`（规格）、`form?`（普通/缓释/控释/肠溶/其他）、`forMembers?`、`dose`、`minIntervalHours?`、`maxPerDay?`、`ruleSource?`（说明书/医嘱/用户说）、`expiresOn?`；看不清的不填，不替说明书编规则。`action`=link：`doseId`、`episodeId` 或 `symptom`、`userWords`（引用用户原话）；`action`=unlink：`linkId`。**吃了药、症状不在这里写**，经状态块进 statebar；登记药盒不等于吃了 |
-| `menu` | 排菜单、换一道、确认、做完了、作废 | `action`=draft：`dishes:[{name,kind,recipeId?,ingredients:[{name,amount?,foodId?,buy?}],prepMin,cookMin,appliance?,heat,seasoning,doneness,steps?}]`、`serveAt`、`diners?`、`want?:{dishes,soups,must}`、`burners?`；swap：`menuId`+`dishId`+`dish`（只换这一道）；confirm：`menuId`、`plan?:[{memberId,dishId,servings}]`（有菜谱的才能排进 plan）；cooked：`menuId`；discard：`menuId`。草案和确认都不动冰箱、不记任何人的账 |
+| `menu` | 排菜单、换一道、确认、做完了、作废 | `action`=draft：`dishes:[{name,kind,recipeId?,ingredients:[{name,amount?,foodId?,buy?}],prepMin,cookMin,appliance?,heat,seasoning,doneness,steps?}]`、`serveAt`、`diners?`、`want?:{dishes,soups,must}`、`burners?`；swap：`menuId`+`dishId`+`dish`（只换这一道）；confirm：`menuId`、`plan?:[{memberId,dishId,servings}]`（有菜谱的才能排进 plan）；cooked（用户说做了才写）：`menuId`+`dishIds?`（做了哪几道，默认全部），没菜单就给 `dishes`；冰箱按这几道菜写的用量扣掉，算不了的（没写量、单位对不上）标「剩多少待确认」放在 `pantry.toCheck`，`deduct:false` 不扣；discard：`menuId`。草案和确认都不动冰箱、不记任何人的账 |
+| `kitchen_recipe` | 把认可的菜存进家里的菜谱 | `action`=save：`menuId`+`dishId`（菜单里那道）或 `dish`（整道菜，同菜单里的格式）；已有同名的要带 `recipeId` 才替换；remove：`recipeId` |
 | `kitchen_pref` | 记下家里说过的口味偏好 | `action`=add：`kind`=avoid_main（不做正菜）/not_default（不默认上）/note、`text`；remove：`prefId`。只记用户说过的 |
 | `plan_log` | 用户说吃了计划里的一餐 | `entryId`、`requestId`、`servings?`（实际份数）；按每份克数拆原料入账，未来日期拒绝 |
 
@@ -132,3 +134,16 @@ nutrition_execute({operation:"health",memberId:"adult_a",args:{sleepHours:6.5,rh
 ## 稳定性验收
 
 保持 MCP 工具目录、参数枚举、两个兼容 profile、错误拒绝路径、修订与幂等的**契约/回归测试**。这里不需要为架构收缩单独进行模型 Token A/B 评测。测试证明程序行为符合约束，不证明模型对食物的识别一定准确。
+
+## 多个客户端
+
+插件远程 MCP 可以有多个客户端（`MCP_HTTP_TOKEN` 是主 Agent，`MCP_CLIENTS` 里是别的 bot），每个有自己的令牌、名字和范围：
+
+- `full`：日常接口全部能用。
+- `kitchen`：只管全家共用的厨房。能看 `pantry`、`kitchen`、`menu`、`cookbook`、`foods`；能写 `pantry`、`menu`（不能排进个人计划）、`kitchen_pref`、`kitchen_recipe`、`food_add`（只能带包装标签）。看不到、也写不了任何人的饮食、健康、计划和用药。
+
+冰箱和菜单的每次改动都记下是哪个客户端改的（页面上的改动记为「页面」）。客户端名字不是家庭成员：它只说明是谁写的，不说明是谁的身体或账。
+
+```
+MCP_CLIENTS='[{"name":"家人工作bot","token":"<至少 32 字节的随机串>","scope":"kitchen"}]'
+```

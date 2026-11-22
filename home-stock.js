@@ -64,6 +64,8 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
     if (!database.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column)) database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   };
   addColumn('pantry_items', 'food_id', 'TEXT');
+  addColumn('pantry_items', 'added_by', 'TEXT'); // which client (agent, bot, the page) wrote it; not a member
+  addColumn('pantry_events', 'by', 'TEXT');
   for (const c of ['ingredient', 'strength', 'form', 'expires_on', 'rule_source']) addColumn('medications', c, 'TEXT');
   for (const c of ['match', 'voided_at', 'void_reason']) addColumn('doses', c, 'TEXT');
   const q = sql => database.prepare(sql);
@@ -85,8 +87,9 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
       return result;
     } catch (e) { database.exec('ROLLBACK'); throw e; }
   }
-  const event = (itemId, action, before, after, note) =>
-    q('INSERT INTO pantry_events VALUES(?,?,?,?,?,?,?)').run(randomUUID(), itemId, now().toISOString(), action, before ?? null, after ?? null, note ?? null);
+  const event = (itemId, action, before, after, note, by) =>
+    q('INSERT INTO pantry_events(id,item_id,at,action,before_quantity,after_quantity,note,by) VALUES(?,?,?,?,?,?,?,?)')
+      .run(randomUUID(), itemId, now().toISOString(), action, before ?? null, after ?? null, note ?? null, text(by, 40) || null);
 
   // ---------- pantry ----------
   // A pantry item MAY point at a food-library entry (a packaged product, say); loose produce needs none.
@@ -96,7 +99,7 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
     if (foodName && !foodName(foodId)) throw Error(`食品库里没有 ${foodId}`);
     return foodId;
   }
-  function pantryAdd({ items, source = 'text', requestId, date } = {}) {
+  function pantryAdd({ items, source = 'text', requestId, date, by } = {}) {
     if (!Array.isArray(items) || !items.length || items.length > 60) throw Error('items: 1–60 items');
     if (!['text', 'receipt', 'photo'].includes(source)) throw Error('source must be text, receipt or photo');
     const day = date ?? today();
@@ -116,9 +119,9 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
         } else { expires = plusDays(day, shelfLife(name)); basis = 'common'; }
         const id = 'p_' + randomUUID();
         const foodId = checkFoodId(raw.foodId);
-        q('INSERT INTO pantry_items(id,name,quantity,note,added_date,expires_date,expiry_basis,source,status,updated_at,food_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
-          .run(id, name, text(raw.quantity, 60), text(raw.note, 200) || null, day, expires, basis, source, 'in', now().toISOString(), foodId);
-        event(id, 'add', null, text(raw.quantity, 60), source);
+        q('INSERT INTO pantry_items(id,name,quantity,note,added_date,expires_date,expiry_basis,source,status,updated_at,food_id,added_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(id, name, text(raw.quantity, 60), text(raw.note, 200) || null, day, expires, basis, source, 'in', now().toISOString(), foodId, text(by, 40) || null);
+        event(id, 'add', null, text(raw.quantity, 60), source, by);
         return { id, name, quantity: text(raw.quantity, 60), expiresOn: expires, expiryBasis: basis, ...(foodId ? { foodId } : {}) };
       });
       return { ok: true, added };
@@ -141,27 +144,29 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
     return pick[0];
   }
   // Cooking took some out: `remaining` is what is left, in the owner's words; empty/0/用完 = all used.
-  function pantryUse({ itemId, name, remaining, note, requestId } = {}) {
-    return once(requestId, () => {
-      const row = findItem({ itemId, name });
-      const left = text(remaining, 60);
-      const finished = left === '' || /^(0|零|没了|用完|吃完|空)/.test(left);
-      q("UPDATE pantry_items SET quantity=?, status=?, updated_at=? WHERE id=?")
-        .run(finished ? row.quantity : left, finished ? 'used' : 'in', now().toISOString(), row.id);
-      event(row.id, finished ? 'used_up' : 'use', row.quantity, finished ? null : left, text(note, 200) || null);
-      return { ok: true, id: row.id, name: row.name, before: row.quantity, remaining: finished ? null : left, usedUp: finished };
-    });
+  function pantryUse({ itemId, name, remaining, note, requestId, by } = {}) {
+    return once(requestId, () => useRow(findItem({ itemId, name }), remaining, note, by));
   }
-  function pantryDiscard({ itemId, name, note, requestId } = {}) {
+  // The write itself, without a transaction of its own: the kitchen calls it inside "we cooked this".
+  function useRow(row, remaining, note, by) {
+    const left = text(remaining, 60);
+    const finished = left === '' || /^(0|零|没了|用完|吃完|空)/.test(left);
+    q("UPDATE pantry_items SET quantity=?, status=?, updated_at=? WHERE id=?")
+      .run(finished ? row.quantity : left, finished ? 'used' : 'in', now().toISOString(), row.id);
+    event(row.id, finished ? 'used_up' : 'use', row.quantity, finished ? null : left, text(note, 200) || null, by);
+    return { ok: true, id: row.id, name: row.name, before: row.quantity, remaining: finished ? null : left, usedUp: finished };
+  }
+  const itemRow = itemId => q("SELECT * FROM pantry_items WHERE id=? AND status='in'").get(itemId ?? '');
+  function pantryDiscard({ itemId, name, note, requestId, by } = {}) {
     return once(requestId, () => {
       const row = findItem({ itemId, name });
       q("UPDATE pantry_items SET status='discarded', updated_at=? WHERE id=?").run(now().toISOString(), row.id);
-      event(row.id, 'discard', row.quantity, null, text(note, 200) || null);
+      event(row.id, 'discard', row.quantity, null, text(note, 200) || null, by);
       return { ok: true, id: row.id, name: row.name, discarded: true };
     });
   }
   // Correct an entry: quantity, name or expiry (e.g. "the milk says 11-28").
-  function pantryEdit({ itemId, name, newName, quantity, expiresOn, foodId, requestId } = {}) {
+  function pantryEdit({ itemId, name, newName, quantity, expiresOn, foodId, requestId, by } = {}) {
     return once(requestId, () => {
       const row = findItem({ itemId, name });
       if (expiresOn != null && !/^\d{4}-\d{2}-\d{2}$/.test(expiresOn)) throw Error('expiresOn must be YYYY-MM-DD');
@@ -170,16 +175,18 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
       const food = foodId === undefined ? row.food_id : checkFoodId(foodId);
       q('UPDATE pantry_items SET name=?, quantity=?, expires_date=?, expiry_basis=?, food_id=?, updated_at=? WHERE id=?')
         .run(next.name, next.quantity, next.expires, next.basis, food, now().toISOString(), row.id);
-      event(row.id, 'edit', row.quantity, next.quantity, null);
+      event(row.id, 'edit', row.quantity, next.quantity, null, by);
       return { ok: true, id: row.id, name: next.name, quantity: next.quantity, expiresOn: next.expires };
     });
   }
   function pantry({ includeGone = false } = {}) {
     const t = today();
-    const rows = q(`SELECT * FROM pantry_items WHERE ${includeGone ? '1' : "status='in'"} ORDER BY expires_date, name`).all();
+    const rows = q(`SELECT p.*, (SELECT e.by FROM pantry_events e WHERE e.item_id=p.id ORDER BY e.at DESC LIMIT 1) AS last_by,
+      (SELECT e.at FROM pantry_events e WHERE e.item_id=p.id ORDER BY e.at DESC LIMIT 1) AS last_at
+      FROM pantry_items p WHERE ${includeGone ? '1' : "status='in'"} ORDER BY expires_date, name`).all();
     const items = rows.map(r => ({ id: r.id, name: r.name, quantity: r.quantity, addedOn: r.added_date, expiresOn: r.expires_date,
       expiryBasis: r.expiry_basis, daysLeft: daysBetween(t, r.expires_date), status: r.status, note: r.note ?? undefined,
-      foodId: r.food_id ?? undefined }));
+      foodId: r.food_id ?? undefined, addedBy: r.added_by ?? undefined, lastChange: r.last_at ? { at: r.last_at, by: r.last_by ?? undefined } : undefined }));
     const inStock = items.filter(i => i.status === 'in');
     return { ok: true, date: t, count: inStock.length,
       expired: inStock.filter(i => i.daysLeft < 0).map(i => i.name),
@@ -415,6 +422,6 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
     return { ok: true, from, members: Object.values(byMember), note: '时长没说的不计入分钟数；运动只来自用户说过的话（经 statebar 核对）' };
   }
 
-  return { pantryAdd, pantryUse, pantryDiscard, pantryEdit, pantry, recentlyGone, medSave, logDose, meds, logSymptom, linkDose, unlinkDose,
+  return { pantryAdd, pantryUse, useRow, itemRow, pantryDiscard, pantryEdit, pantry, recentlyGone, medSave, logDose, meds, logSymptom, linkDose, unlinkDose,
     timeline, logWorkout, workouts };
 }

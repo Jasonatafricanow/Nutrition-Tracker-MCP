@@ -7,8 +7,8 @@
  *
  * Legacy compact and full interfaces remain selectable for migration.
  */
-export const EVERYDAY_READS = Object.freeze(['summary', 'meals', 'foods', 'recipes', 'plan', 'shopping', 'pantry', 'meds', 'workouts', 'timeline', 'kitchen', 'menu']);
-export const EVERYDAY_WRITES = Object.freeze(['meal', 'correct', 'health', 'photo_stage', 'photo_confirm', 'photo_discard', 'recipe_save', 'plan_set', 'plan_remove', 'plan_log', 'food_add', 'pantry', 'med', 'menu', 'kitchen_pref']);
+export const EVERYDAY_READS = Object.freeze(['summary', 'meals', 'foods', 'recipes', 'plan', 'shopping', 'pantry', 'meds', 'workouts', 'timeline', 'kitchen', 'menu', 'cookbook']);
+export const EVERYDAY_WRITES = Object.freeze(['meal', 'correct', 'health', 'photo_stage', 'photo_confirm', 'photo_discard', 'recipe_save', 'plan_set', 'plan_remove', 'plan_log', 'food_add', 'pantry', 'med', 'menu', 'kitchen_pref', 'kitchen_recipe']);
 export const EVERYDAY_PERIODS = Object.freeze(['today', '7d', '30d']);
 
 import { createHash } from 'node:crypto';
@@ -23,7 +23,7 @@ const slot = value => typeof value === 'string' ? (SLOT_ALIASES[value.trim().toL
 // A write without requestId gets one from its own content: the same call retried is the same request,
 // so the engine's idempotency still holds; a different call is a different request.
 function withRequestId(memberId, operation, args) {
-  if (args.requestId || !['meal','correct','photo_stage','photo_confirm','plan_log','recipe_save','pantry','med','menu','kitchen_pref'].includes(operation)) return args;
+  if (args.requestId || !['meal','correct','photo_stage','photo_confirm','plan_log','recipe_save','pantry','med','menu','kitchen_pref','kitchen_recipe'].includes(operation)) return args;
   const digest = createHash('sha256').update(JSON.stringify([memberId ?? null, operation, args])).digest('hex').slice(0, 24);
   return {...args, requestId: `auto-${operation}-${digest}`};
 }
@@ -60,6 +60,8 @@ export function createEverydayInterface(compact) {
       if (!menuId) throw new Error('menu requires menuId');
       return compact.query({view:'menu',recipeId:menuId});
     }
+    // The household cookbook: dishes the family approved and kept (recipeId = one, query = name filter).
+    if (view === 'cookbook') return compact.query({view:'cookbook',recipeId,query:term});
     if (view === 'recipes') {
       return compact.query({view:'recipes',memberId,recipeId,query:term,limit});
     }
@@ -125,6 +127,13 @@ export function createEverydayInterface(compact) {
       const map = {draft:'menu_draft', swap:'menu_swap', confirm:'menu_confirm', cooked:'menu_cooked', discard:'menu_discard'};
       const {action, ...rest} = args;
       if (!Object.hasOwn(map, action)) throw new Error('menu action must be draft, swap, confirm, cooked or discard');
+      return compact.execute({memberId,operation:map[action],args:rest,includeContext:false});
+    }
+    if (operation === 'kitchen_recipe') {
+      // The household cookbook: keep a dish the user approved (from a menu, or given whole), or drop one.
+      const {action, ...rest} = args;
+      const map = {save:'kitchen_recipe_save', remove:'kitchen_recipe_remove'};
+      if (!Object.hasOwn(map, action)) throw new Error('kitchen_recipe action must be save or remove');
       return compact.execute({memberId,operation:map[action],args:rest,includeContext:false});
     }
     if (operation === 'kitchen_pref') {

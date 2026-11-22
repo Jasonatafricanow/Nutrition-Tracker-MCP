@@ -31,8 +31,8 @@ function exec(api,operation,args,memberId='b'){
 }
 
 test('only 3 read and 6 write intents, no universal backdoor',async()=>{
- assert.deepEqual(EVERYDAY_READS,['summary','meals','foods','recipes','plan','shopping','pantry','meds','workouts','timeline','kitchen','menu']);
- assert.deepEqual(EVERYDAY_WRITES,['meal','correct','health','photo_stage','photo_confirm','photo_discard','recipe_save','plan_set','plan_remove','plan_log','food_add','pantry','med','menu','kitchen_pref']);
+ assert.deepEqual(EVERYDAY_READS,['summary','meals','foods','recipes','plan','shopping','pantry','meds','workouts','timeline','kitchen','menu','cookbook']);
+ assert.deepEqual(EVERYDAY_WRITES,['meal','correct','health','photo_stage','photo_confirm','photo_discard','recipe_save','plan_set','plan_remove','plan_log','food_add','pantry','med','menu','kitchen_pref','kitchen_recipe']);
  const f=makeFixture();try{
   await assert.rejects(f.api.query({view:'capabilities'}),/Unsupported everyday read/);
   await assert.rejects(f.api.query({view:'barcode',barcode:'0123456789012'}),/Unsupported everyday read/);
@@ -204,7 +204,7 @@ test('stdio DEFAULT exposes same 2 tools but much smaller enum choices and contr
   assert.deepEqual(write.inputSchema.properties.operation.enum,EVERYDAY_WRITES);
   assert.ok(!JSON.stringify(write.inputSchema).includes('advanced'));
   const guide=await client.getPrompt({name:'nutrition_agent_workflow'});
-  assert.match(guide.messages[0].content.text,/TWELVE read intents and FIFTEEN write intents/);
+  assert.match(guide.messages[0].content.text,/THIRTEEN read intents and SIXTEEN write intents/);
   assert.match(guide.messages[0].content.text,/photo_discard/);
   assert.match(guide.messages[0].content.text,/Never auto-discard/);
   assert.match(write.description,/photo_discard/);

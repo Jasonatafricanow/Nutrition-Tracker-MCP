@@ -250,6 +250,20 @@
     .stock-list > div:not(.sub) > span:last-child, .stock-list .sub > div > span:last-child { white-space:nowrap; }
     .stock-list .exp { color:var(--accent); } .stock-list .soon { color:var(--lv-high); }
     .stock-list .sub { margin-top:8px; padding-top:6px; border-top:1px solid var(--rule); }
+    .stock-list .tiny { font-size:11px; }
+    .stock-list .linkbtn { padding:2px 0; min-height:24px; font-size:12px; margin-left:6px; }
+    .stock-list > div.pantry-row { display:block; padding:2px 0 4px; border-bottom:1px dotted var(--rule); }
+    .stock-list .pantry-row > div { display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
+    .stock-list .pantry-row > div:first-child > span:last-child { white-space:nowrap; }
+    @media (min-width:700px) { .household-card.wide { grid-column:span 2; } }
+    .pantry-add { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .pantry-add input { flex:1 1 90px; min-width:0; font:inherit; padding:6px 8px; border:1px solid var(--rule); border-radius:4px; background:var(--paper); color:var(--ink); }
+    .pantry-add .btn { padding:6px 12px; min-height:32px; font-size:12px; }
+    .stock-list details summary { cursor:pointer; }
+    .stock-list details.recipe { border-bottom:1px solid var(--rule); padding:4px 0; }
+    .stock-list details.recipe summary { display:flex; justify-content:space-between; gap:10px; list-style:none; }
+    .stock-list details.recipe ol { margin:4px 0; padding-left:18px; }
+    .stock-list .sub details > div { display:flex; justify-content:space-between; gap:10px; }
     /* 首屏错落渐入 */
     .reveal { animation: rise .6s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--i, 0) * 60ms); }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
@@ -278,7 +292,7 @@
 
     <!-- 家庭概览：只读，不替代各人的 Agent 交互 -->
     <section id="household-panel" class="reveal hidden" style="margin:20px 0 28px">
-      <div class="sec-head"><h2>家庭概览</h2><span class="aside">数据来自家庭 NAS · 仅供观察</span></div>
+      <div class="sec-head"><h2>家庭概览</h2><span class="aside">数据来自家庭 NAS · 冰箱和菜谱可在这里改</span></div>
       <div id="household-cards" class="household-cards"></div>
       <div id="stock-cards" class="household-cards stock-cards"></div>
     </section>
@@ -500,11 +514,12 @@
       }
       return csrfToken;
     }
-    async function dispatch(tool, args = {}, memberId) {
+    async function dispatch(tool, args = {}, memberId, op) {
       if (!connected) return toast("未连接服务端，操作未执行");
       try {
         const csrf = await sessionToken();
-        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json", "X-Nutrition-CSRF":csrf }, body: JSON.stringify({ tool, args, ...(memberId?{memberId}:{}) }) });
+        const payload = op ? { op, args } : { tool, args, ...(memberId?{memberId}:{}) };
+        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json", "X-Nutrition-CSRF":csrf }, body: JSON.stringify(payload) });
         const body = await r.json();
         if (!r.ok) toast(body.error || `请求失败 ${r.status}`);
         return body;
@@ -831,18 +846,10 @@
         <div class="mini">${fields.map(([a,b])=>`<div><span>${esc(a)}</span> ${esc(b)}</div>`).join('')}</div>
         <div class="small" style="margin-top:10px"><span class="muted">近 7 天吃了什么</span>${log}</div></article>`;
     }
-    // Fridge, medicine cabinet and workouts: shared household stock, read-only here.
+    // Fridge (editable here), menus, cookbook, timeline, medicine cabinet and workouts.
     const clock=iso=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso)).replace('/','-');
     const card=(title,body)=>`<article class="household-card"><h3>${title}</h3><div class="stock-list">${body}</div></article>`;
     const none='<span class="muted">还没有记录</span>';
-    function pantryCard(p){
-      const rows=(p?.items||[]).map(i=>{
-        const cls=i.daysLeft<0?'exp':i.daysLeft<=2?'soon':'';
-        const left=i.daysLeft<0?`过期 ${-i.daysLeft} 天`:i.daysLeft===0?'今天到期':`还剩 ${i.daysLeft} 天`;
-        return `<div class="${cls}"><span>${esc(i.name)}${i.quantity?` <span class="muted">${esc(i.quantity)}</span>`:''}</span><span>${left}</span></div>`;
-      });
-      return card('冰箱',rows.join('')||none);
-    }
     function medsCard(m,names){
       const who=ids=>ids?.length?ids.map(id=>names[id]||id).join('、'):'全家';
       const cab=(m?.cabinet||[]).map(x=>`<div><span>${esc(x.name)} <span class="muted">${esc(who(x.forMembers))}</span></span><span>${esc([x.dose,x.minIntervalHours?`隔 ${x.minIntervalHours} 小时`:''].filter(Boolean).join(' · '))}</span></div>`);
@@ -862,11 +869,130 @@
         .map(r=>`<div class="muted"><span>${esc(md(r.date))} ${esc(names[r.memberId]||r.memberId)} ${esc(r.activity)}</span><span>${r.durationMin?r.durationMin+' 分钟':''}</span></div>`);
       return card('运动',sum.length?sum.join('')+`<div class="sub">${recent.join('')}</div>`:none);
     }
+    // ---------- 厨房：冰箱（可改）、菜单、菜谱、症状和服药时间线 ----------
+    // Writes go through the same everyday operations an agent uses, as client 「页面」 (kitchen scope only).
+    let stockBusy=false; // a form or prompt is open: the 30-second refresh must not wipe it
+    const rid=p=>p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
+    async function kitchenOp(op,args){
+      const body=await dispatch(null,{...args,requestId:args.requestId??rid('page-'+op)},undefined,op);
+      if(body?.ok)await refreshStock(lastMembers);
+      return body;
+    }
+    function pantryCard(p){
+      const rows=(p?.items||[]).map(i=>{
+        const cls=i.daysLeft<0?'exp':i.daysLeft<=2?'soon':'';
+        const left=i.daysLeft<0?`过期 ${-i.daysLeft} 天`:i.daysLeft===0?'今天到期':`还剩 ${i.daysLeft} 天`;
+        const q=i.quantity||'';
+        const qty=q?` <span class="${/待确认/.test(q)?'soon':'muted'}">${esc(q)}</span>`:'';
+        const who=i.lastChange?.by?`<span class="muted tiny" title="${clock(i.lastChange.at)}">${esc(i.lastChange.by)} 改的</span>`:'<span></span>';
+        return `<div class="pantry-row"><div class="${cls}"><span>${esc(i.name)}${qty}</span><span>${left}</span></div><div>${who}<span>
+          <button type="button" class="linkbtn" onclick="pantryEditQty('${esc(i.id)}')" aria-label="改 ${esc(i.name)} 的数量">改</button>
+          <button type="button" class="linkbtn" onclick="pantryDone('${esc(i.id)}','${esc(i.name)}','use')" aria-label="${esc(i.name)} 用完了">用完</button>
+          <button type="button" class="linkbtn" onclick="pantryDone('${esc(i.id)}','${esc(i.name)}','discard')" aria-label="扔掉 ${esc(i.name)}">扔掉</button></span></div></div>`;
+      });
+      const form=`<form class="pantry-add" onsubmit="pantryAddForm(event)">
+        <input name="name" placeholder="买了什么" required maxlength="60" aria-label="名称">
+        <input name="quantity" placeholder="多少，如 500g" maxlength="60" aria-label="数量">
+        <input name="days" type="number" min="0" max="3650" placeholder="能放几天" aria-label="能放几天（不填按常见）">
+        <button class="btn ghost" type="submit">放进冰箱</button></form>`;
+      return card('冰箱',(rows.join('')||none)+`<div class="sub">${form}</div>`).replace('class="household-card"','class="household-card wide"');
+    }
+    const pantryById=id=>(lastPantry?.items||[]).find(i=>i.id===id);
+    async function pantryEditQty(id){
+      const it=pantryById(id); if(!it)return;
+      stockBusy=true;
+      const raw=prompt(`「${it.name}」现在还剩多少？（照你会说的写，如 200g、半盒）`,(it.quantity||'').replace(/（[^（]*待确认）$/,''));
+      stockBusy=false;
+      if(raw===null)return;
+      const r=await kitchenOp('pantry',{action:'edit',itemId:id,quantity:raw.trim()});
+      if(r?.ok)toast(`已改：${it.name} ${raw.trim()}`);
+    }
+    async function pantryDone(id,name,how){
+      const r=await kitchenOp('pantry',how==='use'?{action:'use',itemId:id,remaining:''}:{action:'discard',itemId:id});
+      if(r?.ok)toast(how==='use'?`${name} 用完了`:`${name} 扔掉了`);
+    }
+    async function pantryAddForm(ev){
+      ev.preventDefault();
+      const f=ev.target, name=f.name.value.trim(); if(!name)return;
+      const item={name,quantity:f.quantity.value.trim(),...(f.days.value!==''?{shelfLifeDays:Number(f.days.value)}:{})};
+      const r=await kitchenOp('pantry',{action:'add',items:[item]});
+      if(r?.ok){f.reset();toast(`已放进冰箱：${name}`);await refreshStock();}
+    }
+
+    // Menus: what to buy, the stove order, cook it, keep a dish.
+    const dishLine=(m,d)=>{
+      const kept=d.kitchenRecipeId?'<span class="muted">已存菜谱</span>':
+        `<button type="button" class="linkbtn" onclick="keepDish('${esc(m.menuId)}','${esc(d.id)}','${esc(d.name)}')">存为菜谱</button>`;
+      const off=d.cooked===false?' <span class="muted">（没做）</span>':'';
+      return `<div><span>${esc(d.name)} <span class="muted">${esc(d.kind)}</span>${off}</span><span>${kept}</span></div>`;
+    };
+    function menuBlock(m){
+      const head=`${esc(md(m.date))} ${esc(m.mealSlot||'')} ${m.status==='draft'?'草案':m.status==='confirmed'?'定了':'做了'}`;
+      const buy=m.shopping?.buy?.map(l=>l.name)||[], check=(m.shopping?.checkAtHome||[]).filter(l=>!l.staple).map(l=>l.name);
+      const shop=m.status==='cooked'?'':`<div class="muted">要买：${esc(buy.join('、')||'无')}${check.length?`；先查家里：${esc(check.join('、'))}`:''}</div>`;
+      const steps=m.status==='cooked'?'':`<details><summary class="muted">开火顺序</summary>${(m.timeline?.steps||[]).map(s=>`<div><span>${esc(s.at)}</span><span>${esc(s.what)}</span></div>`).join('')}</details>`;
+      const cook=m.status==='cooked'?'':`<button type="button" class="linkbtn" onclick="cookedMenu('${esc(m.menuId)}')">做好了（按用量扣冰箱）</button>`;
+      return `<div class="sub"><b>${head}</b> ${cook}${m.dishes.map(d=>dishLine(m,d)).join('')}${shop}${steps}</div>`;
+    }
+    function menusCard(menus){
+      return card('菜单',menus.length?menus.map(menuBlock).join(''):'<span class="muted">还没有菜单；跟助手说「今晚吃什么」</span>');
+    }
+    async function cookedMenu(menuId){
+      stockBusy=true; const ok=confirm('这桌菜都做了？冰箱会按菜里写的用量扣掉。只做了其中几道就跟助手说是哪几道。'); stockBusy=false;
+      if(!ok)return;
+      const r=await kitchenOp('menu',{action:'cooked',menuId});
+      if(r?.ok){
+        const chk=(r.pantry?.toCheck||[]).map(x=>x.name);
+        toast('已记做好'+(chk.length?`；${chk.join('、')} 用量算不出来，已标「剩多少待确认」`:''));
+      }
+    }
+    async function keepDish(menuId,dishId,name){
+      const r=await kitchenOp('kitchen_recipe',{action:'save',menuId,dishId});
+      if(r?.ok)toast(`「${name}」存进菜谱了`);
+    }
+
+    // The cookbook: dishes the family kept.
+    function cookbookCard(b){
+      const rows=(b?.recipes||[]).map(r=>`<details class="recipe"><summary><span>${esc(r.name)} <span class="muted">${esc(r.kind)}</span></span>
+          <span class="muted">${r.timesCooked?`做过 ${r.timesCooked} 次${r.lastCooked?' · 上次 '+esc(md(r.lastCooked)):''}`:'还没做过'}</span></summary>
+        <div class="muted">${r.ingredients.map(i=>esc(i.name+(i.amount?' '+i.amount:''))).join('、')}</div>
+        ${['heat','seasoning','doneness'].filter(k=>r[k]).map(k=>`<div class="muted">${({heat:'火候',seasoning:'调味',doneness:'熟度'})[k]}：${esc(r[k])}</div>`).join('')}
+        ${(r.steps||[]).length?`<ol>${r.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>`:''}
+        <button type="button" class="linkbtn" onclick="dropRecipe('${esc(r.recipeId)}','${esc(r.name)}')">从菜谱删掉</button></details>`);
+      return card('菜谱',rows.join('')||'<span class="muted">还没有；菜单里认可的菜点「存为菜谱」，或跟助手说「这个存下来」</span>');
+    }
+    async function dropRecipe(id,name){
+      stockBusy=true; const ok=confirm(`把「${name}」从菜谱删掉？`); stockBusy=false;
+      if(!ok)return;
+      const r=await kitchenOp('kitchen_recipe',{action:'remove',recipeId:id});
+      if(r?.ok)toast(`已删掉「${name}」`);
+    }
+
+    // Symptoms and doses per member, side by side; links only where the user said so.
+    function timelineCard(t,names){
+      const ST={active:'开始',improving:'好些了',resolved:'好了'};
+      const ms=(t?.members||[]).filter(m=>m.events.length);
+      const body=ms.map(m=>`<div class="sub"><b>${esc(names[m.memberId]||m.memberId)}</b>${m.events.slice(-12).map(e=>e.type==='symptom'
+        ?`<div><span>${esc(e.symptom)} <span class="soon">${ST[e.status]||esc(e.status)}</span></span><span class="muted">${clock(e.at)}</span></div>`
+        :`<div><span>吃了 ${esc(e.medication)} <span class="muted">${esc(e.amount)}</span>${e.forSymptom?.length?` <span class="muted">为了${esc(e.forSymptom.map(x=>x.symptom).join('、'))}</span>`:''}</span><span class="muted">${clock(e.at)}</span></div>`).join('')}</div>`).join('');
+      return card('身体 · 近 7 天',body||'<span class="muted">这 7 天没人说哪儿不舒服</span>');
+    }
+
+    let lastMembers=[], lastPantry=null;
     async function refreshStock(members){
+      if(members)lastMembers=members;
       const get=v=>fetch('/api/household?view='+v).then(r=>r.ok?r.json():null).catch(()=>null);
-      const [p,m,w]=await Promise.all([get('pantry'),get('meds'),get('workouts')]);
-      const names=Object.fromEntries((members||[]).map(x=>[x.memberId,x.name]));
-      $('stock-cards').innerHTML=pantryCard(p)+medsCard(m,names)+workoutsCard(w,names);
+      const [p,m,w,k,b,t]=await Promise.all([get('pantry'),get('meds'),get('workouts'),get('kitchen'),get('cookbook'),get('timeline')]);
+      const ids=[...(k?.openMenus||[]).map(x=>x.menuId),...(k?.recentlyCooked||[]).slice(0,2).map(x=>x.menuId)];
+      const menus=(await Promise.all(ids.map(id=>get('menu&menuId='+encodeURIComponent(id))))).filter(Boolean);
+      // Someone is answering a prompt or typing in a form: leave it alone until the next refresh.
+      const box=$('stock-cards');
+      if(stockBusy||[...box.querySelectorAll('input')].some(i=>i.value)||box.contains(document.activeElement)&&document.activeElement.tagName==='INPUT')return;
+      lastPantry=p;
+      const names=Object.fromEntries((lastMembers||[]).map(x=>[x.memberId,x.name]));
+      const open=new Set([...box.querySelectorAll('details[open]>summary')].map(s=>s.textContent));
+      box.innerHTML=pantryCard(p)+menusCard(menus)+cookbookCard(b)+timelineCard(t,names)+medsCard(m,names)+workoutsCard(w,names);
+      for(const s of box.querySelectorAll('details>summary'))if(open.has(s.textContent))s.parentElement.open=true;
     }
     async function refreshHousehold() {
       try {

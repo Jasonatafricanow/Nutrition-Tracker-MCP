@@ -5,18 +5,13 @@
  * No MCP session IDs are issued or accepted as authority.
  */
 import express from 'express';
-import { timingSafeEqual } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 const LOCAL_HOSTS = ['127.0.0.1', 'localhost', '[::1]'];
 const MAX_ACTIVE = 16;
 const isTrue = v => ['1', 'true', 'yes'].includes(String(v ?? '').toLowerCase());
 const csv = str => String(str ?? '').split(',').map(x => x.trim()).filter(Boolean);
-const compare = (a,b) => {
-  if (typeof a !== 'string' || typeof b !== 'string') return false;
-  const x=Buffer.from(a), y=Buffer.from(b);
-  return x.length===y.length && timingSafeEqual(x,y);
-};
+import { loadClients, findClient } from './clients.js';
 function hostname(raw) {
   if (!raw || /[/\\@\s]/.test(raw)) return null;
   try {
@@ -39,10 +34,11 @@ function allowedOrigin(origin, allow) {
  */
 export function startRemoteMcp({makeServer,config=process.env,log=console.error}) {
   if (!isTrue(config.MCP_HTTP_ENABLED)) return null;
-  const token=config.MCP_HTTP_TOKEN;
-  if (typeof token!=='string' || Buffer.byteLength(token)<32) {
+  if (typeof config.MCP_HTTP_TOKEN!=='string' || Buffer.byteLength(config.MCP_HTTP_TOKEN)<32) {
     throw new Error('MCP_HTTP_TOKEN must be a secret of at least 32 bytes when remote MCP is enabled');
   }
+  // The main agent's token plus any other family bots (MCP_CLIENTS), each with its own name and scope.
+  const clients=loadClients(config);
   const host=config.MCP_HTTP_HOST || '127.0.0.1';
   const port=Number(config.MCP_HTTP_PORT || 3457);
   if (!Number.isInteger(port)||port<0||port>65535) throw new Error('Invalid MCP_HTTP_PORT');
@@ -63,10 +59,12 @@ export function startRemoteMcp({makeServer,config=process.env,log=console.error}
     if (!currentHost || !hosts.has(currentHost)) return res.status(403).json({error:'MCP Host denied'});
     if (!allowedOrigin(req.get('Origin'),origins)) return res.status(403).json({error:'MCP Origin denied'});
     const bearer=req.get('Authorization')?.match(/^Bearer (.+)$/i)?.[1];
-    if (!compare(bearer,token)) {
+    const client=findClient(clients,bearer);
+    if (!client) {
       res.setHeader('WWW-Authenticate','Bearer realm="nutrition-mcp"');
       return res.status(401).json({error:'MCP authentication required'});
     }
+    res.locals.client=client;
     next();
   });
   app.post('/mcp',async(req,res)=>{
@@ -74,7 +72,7 @@ export function startRemoteMcp({makeServer,config=process.env,log=console.error}
     ++active;
     let mcp;
     try {
-      mcp=makeServer();
+      mcp=makeServer(res.locals.client);
       const transport=new StreamableHTTPServerTransport({
         sessionIdGenerator:undefined,
         enableJsonResponse:true,

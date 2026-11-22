@@ -90,6 +90,10 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      if(!household)throw Error('menu requires household mode');
      return household.kitchen.menu({menuId:recipeId});
    }
+   if(view==='cookbook'){
+     if(!household)throw Error('cookbook requires household mode');
+     return household.kitchen.cookbook({recipeId,query:term});
+   }
    if(view==='health_history'){
      if(!household)throw Error('health_history requires household mode');
      if(!memberId)throw Error('memberId required');
@@ -182,7 +186,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
    }
    // The kitchen (menus and stated preferences): shared by the household; never writes the pantry or a ledger.
    const KITCHEN={menu_draft:'draft',menu_swap:'swap',menu_confirm:'confirm',menu_cooked:'cooked',menu_discard:'discard',
-     kitchen_pref_add:'prefAdd',kitchen_pref_remove:'prefRemove'};
+     kitchen_pref_add:'prefAdd',kitchen_pref_remove:'prefRemove',kitchen_recipe_save:'recipeSave',kitchen_recipe_remove:'recipeRemove'};
    if(Object.hasOwn(KITCHEN,operation)){
      if(!household)throw Error(operation+' requires household mode');
      return household.kitchen[KITCHEN[operation]](args);
