@@ -30,7 +30,7 @@ export function loadClients(config) {
     if (out.some(c => c.token === token)) throw Error(`${where}: two clients share a token`);
     out.push(Object.freeze({ name, token, scope }));
   };
-  if (config.MCP_HTTP_TOKEN) add({ name: (config.MCP_HTTP_CLIENT_NAME || 'agent').trim(), token: config.MCP_HTTP_TOKEN, scope: 'full' }, 'MCP_HTTP_TOKEN');
+  if (config.MCP_HTTP_TOKEN) add({ name: (config.MCP_HTTP_CLIENT_NAME || config.NUTRITION_AGENT_ACTOR || 'agent').trim(), token: config.MCP_HTTP_TOKEN, scope: 'full' }, 'MCP_HTTP_TOKEN');
   if (config.MCP_CLIENTS) {
     let list;
     try { list = JSON.parse(config.MCP_CLIENTS); } catch { throw Error('MCP_CLIENTS must be a JSON array'); }
