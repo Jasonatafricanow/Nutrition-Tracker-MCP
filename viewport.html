@@ -4,28 +4,62 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>今日 · Nutrition Tracker MCP</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,400&family=Instrument+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500&family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet">
   <style>
+/* 面板底座 v1 · 方向 B「仪表台」（2026-11-22 选定）
+   源文件：C:\projects\xiyue-service-work\panel-base\panel-base.css —— 各面板各自拷一份，改这里再同步过去。
+   只管四样：颜色变量、字体与字号阶梯、圆角间距、回总入口的顶栏（.pb-hub）。各面板把自己的变量名映射到 --pb-*。
+   颜色只表示含义：accent=可点/进行中，warn=在等/要注意，ok=好转/完成，bad=出错/变差；
+   行情涨跌另用 mkt-up(红)/mkt-down(绿)，和好坏分开。 */
+:root{
+  --pb-bg:#F3F4F5;--pb-panel:#FFFFFF;--pb-field:#FFFFFF;--pb-hover:#EEF0F2;
+  --pb-ink:#16191D;--pb-muted:#5B636E;--pb-line:#DFE2E6;
+  --pb-accent:#1F6FEB;--pb-accent-ink:#FFFFFF;--pb-accent-soft:#E8F0FE;
+  --pb-warn:#B35900;--pb-ok:#1A7F37;--pb-bad:#C62828;
+  --pb-mkt-up:#D1242F;--pb-mkt-down:#1A7F37;
+  --pb-hub-bg:#16191D;--pb-hub-ink:#E9ECEF;--pb-hub-on:#2B3138;
+  --pb-font:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --pb-mono:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,"SF Mono",Menlo,monospace;
+  --pb-fs-xs:12px;--pb-fs-sm:13px;--pb-fs:14px;--pb-fs-md:16px;--pb-fs-lg:20px;--pb-fs-xl:28px;
+  --pb-r:6px;--pb-r-lg:8px;--pb-gap:16px;
+}
+@media (prefers-color-scheme:dark){:root{
+  --pb-bg:#111315;--pb-panel:#1A1D21;--pb-field:#14171A;--pb-hover:#23272C;
+  --pb-ink:#E6E9EC;--pb-muted:#9AA3AE;--pb-line:#2D3238;
+  --pb-accent:#4C8DFF;--pb-accent-ink:#0B1220;--pb-accent-soft:#1A2740;
+  --pb-warn:#E8A15A;--pb-ok:#5BC27A;--pb-bad:#F07070;
+  --pb-mkt-up:#F26B6B;--pb-mkt-down:#4CC07A;
+  --pb-hub-bg:#0B0D0F;--pb-hub-ink:#E6E9EC;--pb-hub-on:#23272C;
+}}
+.pb-hub{position:sticky;top:0;z-index:1000;display:flex;align-items:center;gap:2px;height:40px;padding:0 16px;
+  background:var(--pb-hub-bg);color:var(--pb-hub-ink);font:400 var(--pb-fs) var(--pb-font);overflow-x:auto;scrollbar-width:none}
+.pb-hub::-webkit-scrollbar{display:none}
+.pb-hub b{font-weight:600;margin-right:12px;white-space:nowrap}
+.pb-hub a{color:inherit!important;text-decoration:none!important;border:0!important;padding:5px 10px;border-radius:var(--pb-r);opacity:.7;white-space:nowrap}
+.pb-hub a:hover{opacity:1;background:var(--pb-hub-on)}
+.pb-hub a[aria-current]{opacity:1;background:var(--pb-hub-on);font-weight:600}
+.pb-hub a:focus-visible{outline:2px solid var(--pb-accent);outline-offset:1px}
+.pb-num{font-family:var(--pb-mono);font-variant-numeric:tabular-nums}
+@media (max-width:480px){.pb-hub{padding:0 4px}.pb-hub b{display:none}.pb-hub a{padding:5px 6px}}
+
     :root {
-      --paper: #F4F0E8; --paper-2: #ECE6DA; --ink: #1C1B19; --ink-2: #57524A; --rule: #CFC7B8;
-      --accent: #B53A27; --lv-high: #86570F; --lv-med: #625D54; --lv-low: #4C6644;
-      --serif: "Noto Serif SC", "Songti SC", serif;
-      --display: "Fraunces", "Noto Serif SC", serif;
-      --sans: "Instrument Sans", "Noto Sans SC", "PingFang SC", sans-serif;
+      /* 面板底座 v1（方向 B「仪表台」，2026-11-22），取自 panel-base.css */
+      --paper: #F3F4F5; --paper-2: #EEF0F2; --ink: #16191D; --ink-2: #5B636E; --rule: #DFE2E6;
+      --accent: #C62828; --lv-high: #B35900; --lv-med: #5B636E; --lv-low: #1A7F37;
+      --serif: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --display: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "SF Mono", Menlo, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       color-scheme: light;
     }
     @media (prefers-color-scheme: dark) {
       :root:not([data-theme="light"]) {
-        --paper: #1A1916; --paper-2: #23211D; --ink: #ECE6DA; --ink-2: #B3AC9F; --rule: #3A3731;
-        --accent: #E0674F; --lv-high: #D4A04E; --lv-med: #A39C90; --lv-low: #8FB083;
+        --paper: #111315; --paper-2: #23272C; --ink: #E6E9EC; --ink-2: #9AA3AE; --rule: #2D3238;
+        --accent: #F07070; --lv-high: #E8A15A; --lv-med: #9AA3AE; --lv-low: #5BC27A;
         color-scheme: dark;
       }
     }
     :root[data-theme="dark"] {
-      --paper: #1A1916; --paper-2: #23211D; --ink: #ECE6DA; --ink-2: #B3AC9F; --rule: #3A3731;
-      --accent: #E0674F; --lv-high: #D4A04E; --lv-med: #A39C90; --lv-low: #8FB083;
+      --paper: #111315; --paper-2: #23272C; --ink: #E6E9EC; --ink-2: #9AA3AE; --rule: #2D3238;
+      --accent: #F07070; --lv-high: #E8A15A; --lv-med: #9AA3AE; --lv-low: #5BC27A;
       color-scheme: dark;
     }
 
@@ -54,7 +88,7 @@
     .masthead { padding: 32px 0 16px; border-bottom: 2px solid var(--ink); }
     .masthead-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
     .dateline { font: 600 34px/1.1 var(--serif); letter-spacing: 0.01em; }
-    .dateline em { font: italic 400 22px var(--display); color: var(--ink-2); margin-left: 12px; letter-spacing: 0; }
+    .dateline em { font: 400 20px var(--display); color: var(--ink-2); margin-left: 12px; letter-spacing: 0; }
     .level-word { font: 700 34px/1.1 var(--serif); }
     .level-word small { font: 500 14px var(--sans); color: var(--ink-2); margin-left: 8px; }
     .meta { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--ink-2); }
@@ -70,7 +104,7 @@
     section { padding: 40px 0 8px; }
     .sec-head { border-top: 1px solid var(--ink); padding-top: 12px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
     .sec-head h2 { margin: 0; font: 600 22px/1.3 var(--serif); }
-    .sec-head h2 i { font: italic 400 22px var(--display); color: var(--ink-2); margin-right: 10px; }
+    .sec-head h2 i { font: 400 16px var(--display); color: var(--ink-2); margin-right: 10px; }
     .sec-head .aside { font-size: 12px; color: var(--ink-2); }
 
     /* 主数字 */
@@ -223,6 +257,7 @@
   </style>
 </head>
 <body>
+  <nav class="pb-hub" aria-label="家里的面板"><b>家里的面板</b><a href="/app/piweb/chat" data-k="chat">助手</a><a href="/app/piweb/manage" data-k="manage">管理</a><a href="/app/workbench/" data-k="workbench">工作台</a><a href="/app/nutrition/" data-k="nutrition" aria-current="page">家庭健康</a><a href="/app/stock/" data-k="stock">涨停</a><a href="/app/proxypanel/" data-k="proxy">旁路代理</a></nav>
   <div class="wrap">
     <header class="masthead reveal" style="--i:0">
       <div class="masthead-row">
