@@ -974,8 +974,21 @@
       const ms=(t?.members||[]).filter(m=>m.events.length);
       const body=ms.map(m=>`<div class="sub"><b>${esc(names[m.memberId]||m.memberId)}</b>${m.events.slice(-12).map(e=>e.type==='symptom'
         ?`<div><span>${esc(e.symptom)} <span class="soon">${ST[e.status]||esc(e.status)}</span></span><span class="muted">${clock(e.at)}</span></div>`
-        :`<div><span>吃了 ${esc(e.medication)} <span class="muted">${esc(e.amount)}</span>${e.forSymptom?.length?` <span class="muted">为了${esc(e.forSymptom.map(x=>x.symptom).join('、'))}</span>`:''}</span><span class="muted">${clock(e.at)}</span></div>`).join('')}</div>`).join('');
+        :`<div><span>吃了 ${esc(e.medication)} <span class="muted">${esc(e.amount)}</span>${e.inCabinet?'':' <span class="soon tiny">药箱没对上</span>'}${e.forSymptom?.length?` <span class="muted">为了${esc(e.forSymptom.map(x=>x.symptom).join('、'))}</span>`:''}</span><span class="muted">${clock(e.at)}<button type="button" class="linkbtn" onclick="doseFix('${esc(e.doseId)}','${esc(e.medication)}','${esc(e.amount)}')" aria-label="改这次 ${esc(e.medication)} 的剂量">改</button><button type="button" class="linkbtn" onclick="doseRemove('${esc(e.doseId)}','${esc(e.medication)}')" aria-label="删掉这次 ${esc(e.medication)}">删</button></span></div>`).join('')}</div>`).join('');
       return card('身体 · 近 7 天',body||'<span class="muted">这 7 天没人说哪儿不舒服</span>');
+    }
+    // Hand corrections of a recorded dose; the old values stay in the plugin's edit history.
+    async function doseFix(id,name,amount){
+      stockBusy=true; const raw=prompt(`这次「${name}」实际吃了多少？（照你会说的写，如 2颗、5ml）`,amount==='没说'?'':amount); stockBusy=false;
+      if(raw==null||!raw.trim())return;
+      const r=await kitchenOp('med',{action:'fix',doseId:id,amount:raw.trim(),userWords:`页面上改成 ${raw.trim()}`});
+      if(r?.ok)toast(`已改成 ${raw.trim()}`);
+    }
+    async function doseRemove(id,name){
+      stockBusy=true; const ok=confirm(`删掉这次「${name}」？（没吃或记重了；记录留痕，不再算进间隔）`); stockBusy=false;
+      if(!ok)return;
+      const r=await kitchenOp('med',{action:'remove',doseId:id,userWords:'页面上删掉：没吃或记重了'});
+      if(r?.ok)toast(`已删掉这次「${name}」`);
     }
 
     let lastMembers=[], lastPantry=null;

@@ -64,7 +64,7 @@ test('a kitchen bot manages the shared fridge under its own name and cannot reac
   await assert.rejects(call(bot,'nutrition_execute',{operation:'food_add',args:{name:'某菜',state:'raw',p:1,c:1,f:1,dataSource:'x'}}),/包装标签/);
   const resources=await bot.listResources().catch(()=>({resources:[]}));
   assert.ok(!resources.resources.some(r=>r.name==='snapshot'),'the owner snapshot is not for a kitchen bot');
-  // The dashboard writes as 页面, kitchen scope.
+  // The dashboard writes as 页面: the kitchen, plus fixing a recorded dose.
   const s=await fetch(`http://127.0.0.1:${ui}/api/session`).then(r=>r.json());
   const page=(body)=>fetch(`http://127.0.0.1:${ui}/api/mcp-dispatch`,{method:'POST',headers:{'Content-Type':'application/json','X-Nutrition-CSRF':s.csrfToken},body:JSON.stringify(body)});
   const added=await page({op:'pantry',args:{action:'add',items:[{name:'青菜',quantity:'1把'}],requestId:'pg-1'}});
@@ -73,6 +73,9 @@ test('a kitchen bot manages the shared fridge under its own name and cannot reac
   assert.equal((await page({view:'cookbook'})).status,200);
   assert.equal((await page({view:'meals',args:{memberId:'owner'}})).status,400,'the page kitchen path reads no ledger');
   assert.equal((await page({op:'meal',args:{}})).status,400);
+  // It may fix a recorded dose, nothing else in the cabinet.
+  assert.equal((await page({op:'med',args:{name:'布洛芬',dose:'1片'}})).status,400);
+  assert.match(await (await page({op:'med',args:{action:'remove',doseId:'nope',userWords:'页面上删掉'}})).text(),/没有这次服药/);
  }finally{
   for(const c of clients)await c.close().catch(()=>{});
   child.kill();await new Promise(r=>{if(child.exitCode!==null||child.signalCode!==null)return r();child.once('exit',r);setTimeout(r,1500).unref();});

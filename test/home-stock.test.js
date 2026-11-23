@@ -57,3 +57,38 @@ test('exercise: statebar workouts add up per member for the week; a replay is no
   const me = s.workouts({ memberId: 'owner' }).members[0];
   assert.deepEqual([me.sessionsThisWeek, me.minutesThisWeek, me.recent.length], [1, 40, 2]);
 });
+
+test('medicine: doses said before the box was registered match it later; filling in the box keeps what was there; a dose can be fixed or removed on the user words', () => {
+  const s = stock();
+  // What happened on 11-23: two supplements said by short names, the cabinet still empty.
+  const d3 = s.logDose({ memberId: 'owner', medication: 'd3', takenAt: '2026-11-20T00:33:00+08:00', amount: '1颗', sourceEventId: 'e1' });
+  s.logDose({ memberId: 'owner', medication: '维生素b族', takenAt: '2026-11-20T00:33:00+08:00', amount: '1颗', sourceEventId: 'e2' });
+  const saved = s.medSave({ name: '维生素D3软胶囊', aliases: ['d3', '维生素D3'], forMembers: ['owner'], dose: '每粒2000 IU' });
+  assert.deepEqual(saved.dosesLinked.map(x => x.said), ['d3']);
+  assert.equal(s.meds({ memberId: 'owner' }).recent.find(r => r.medication === '维生素D3软胶囊').note, '没登记用药间隔，无法判断'); // in the cabinet now
+  // Filling in later: only the new field; aliases, members and dose stay.
+  const id = saved.medication.id;
+  const later = s.medSave({ medicationId: id, strength: '50µg' }).medication;
+  assert.deepEqual([later.strength, later.aliases, later.forMembers, later.dose], ['50µg', ['d3', '维生素D3'], ['owner'], '每粒2000 IU']);
+  // A second entry for the same box is refused, not made.
+  assert.throws(() => s.medSave({ name: 'D3', aliases: ['d3'] }), /已经是药箱里「维生素D3软胶囊」/);
+  // Corrections need the user words; the old values are kept in the edit history.
+  assert.throws(() => s.fixDose({ doseId: d3.id, amount: '2颗' }), /userWords/);
+  const fixed = s.fixDose({ doseId: d3.id, amount: '2颗', userWords: '那颗D3其实是两颗', by: '主助手' });
+  assert.deepEqual([fixed.was.amount, fixed.now.amount, fixed.now.inCabinet], ['1颗', '2颗', true]);
+  const b = s.timeline({ memberIds: ['owner'] }).members[0].events.find(e => e.medication === '维生素b族');
+  assert.equal(b.inCabinet, false);
+  s.fixDose({ doseId: b.doseId, remove: true, userWords: '维生素B那次记重了' });
+  assert.deepEqual(s.timeline({ memberIds: ['owner'] }).members[0].events.map(e => [e.medication, e.amount]), [['维生素D3软胶囊', '2颗']]);
+  assert.throws(() => s.fixDose({ doseId: b.doseId, amount: '1颗', userWords: '再改一次' }), /没有这次服药/);
+});
+
+test('medicine: a box registered by an older version still picks up its earlier doses when the plugin starts', () => {
+  const database = new DatabaseSync(':memory:');
+  const s = createHomeStock({ database, now: at(T0) });
+  s.logDose({ memberId: 'owner', medication: 'd3', takenAt: '2026-11-20T00:33:00+08:00', sourceEventId: 'e1' });
+  // As the old medSave left it: the box saved, the dose never matched.
+  database.prepare("INSERT INTO medications(id,name,aliases,updated_at) VALUES('med_x','维生素D3软胶囊','[\"d3\"]','2026-11-20')").run();
+  const again = createHomeStock({ database, now: at(T0) });
+  assert.equal(again.timeline({ memberIds: ['owner'] }).members[0].events[0].inCabinet, true);
+});

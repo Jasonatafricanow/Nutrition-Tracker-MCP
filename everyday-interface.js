@@ -116,11 +116,11 @@ export function createEverydayInterface(compact) {
     }
     if (operation === 'med') {
       // The medicine cabinet: what is at home and the gap between doses. Doses taken come from statebar;
-      // link/unlink only records what the user said a dose was FOR.
+      // link/unlink only records what the user said a dose was FOR; fix/remove correct a recorded dose on the user's words.
       const {action='save', ...rest} = args;
-      const map = {save:'med_save', link:'dose_link', unlink:'dose_unlink'};
-      if (!Object.hasOwn(map, action)) throw new Error('med action must be save, link or unlink');
-      return compact.execute({memberId,operation:map[action],args:rest,includeContext:false});
+      const map = {save:'med_save', link:'dose_link', unlink:'dose_unlink', fix:'dose_fix', remove:'dose_fix'};
+      if (!Object.hasOwn(map, action)) throw new Error('med action must be save, link, unlink, fix or remove');
+      return compact.execute({memberId,operation:map[action],args:action==='remove'?{...rest,remove:true}:rest,includeContext:false});
     }
     if (operation === 'menu') {
       // A menu is a DRAFT until confirmed; it never touches the pantry or anyone's ledger.

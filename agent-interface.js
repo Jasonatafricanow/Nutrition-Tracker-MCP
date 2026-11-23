@@ -179,7 +179,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
    }
    // Household stock (fridge, medicine cabinet): shared, not a member's ledger.
    const STOCK={pantry_add:'pantryAdd',pantry_use:'pantryUse',pantry_discard:'pantryDiscard',pantry_edit:'pantryEdit',med_save:'medSave',
-     dose_link:'linkDose',dose_unlink:'unlinkDose'};
+     dose_link:'linkDose',dose_unlink:'unlinkDose',dose_fix:'fixDose'};
    if(Object.hasOwn(STOCK,operation)){
      if(!household)throw Error(operation+' requires household mode');
      return household.stock[STOCK[operation]](operation==='dose_link'?{memberId,...args}:args);

@@ -67,7 +67,11 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
   addColumn('pantry_items', 'added_by', 'TEXT'); // which client (agent, bot, the page) wrote it; not a member
   addColumn('pantry_events', 'by', 'TEXT');
   for (const c of ['ingredient', 'strength', 'form', 'expires_on', 'rule_source']) addColumn('medications', c, 'TEXT');
-  for (const c of ['match', 'voided_at', 'void_reason']) addColumn('doses', c, 'TEXT');
+  for (const c of ['match', 'voided_at', 'void_reason', 'said_as']) addColumn('doses', c, 'TEXT');
+  // Every hand correction of a dose (what it was, what it became, the user's words), so nothing is rewritten silently.
+  database.exec(`CREATE TABLE IF NOT EXISTS dose_edits (
+    id TEXT PRIMARY KEY, dose_id TEXT NOT NULL, at TEXT NOT NULL, by TEXT, action TEXT NOT NULL,
+    before_json TEXT NOT NULL, after_json TEXT, user_words TEXT NOT NULL)`);
   const q = sql => database.prepare(sql);
   const today = () => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now());
   const plusDays = (date, n) => new Date(Date.parse(date + 'T12:00:00Z') + n * DAY).toISOString().slice(0, 10);
@@ -211,35 +215,64 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
     expiresOn: r.expires_on ?? undefined, expired: r.expires_on ? r.expires_on < today() : undefined,
     minIntervalHours: r.min_interval_hours, maxPerDay: r.max_per_day, ruleSource: r.rule_source ?? undefined,
     note: r.note ?? undefined, active: !!r.active });
-  function medSave({ name, aliases = [], forMembers = [], dose = '', minIntervalHours, maxPerDay, note, active = true,
+  // Add a medicine, or change one (medicationId, or the same name). Whatever is left out keeps its old value,
+  // so filling in the strength later does not wipe the aliases. A name or alias already used by another entry
+  // is refused instead of making a second entry for the same box.
+  function medSave({ medicationId, name, aliases, forMembers, dose, minIntervalHours, maxPerDay, note, active,
     ingredient, strength, form, expiresOn, ruleSource, requestId } = {}) {
-    const n = text(name, 60);
-    if (!n) throw Error('name required');
+    const n = name == null ? '' : text(name, 60);
+    if (!medicationId && !n) throw Error('name required');
     if (form != null && !FORMS.includes(form)) throw Error(`form must be one of ${FORMS.join('/')}`);
     if (ruleSource != null && !RULE_SOURCES.includes(ruleSource)) throw Error(`ruleSource must be one of ${RULE_SOURCES.join('/')}`);
     if (expiresOn != null && !/^\d{4}-\d{2}(-\d{2})?$/.test(expiresOn)) throw Error('expiresOn must be YYYY-MM or YYYY-MM-DD');
     if (minIntervalHours != null && !(Number(minIntervalHours) > 0 && Number(minIntervalHours) <= 168)) throw Error('minIntervalHours must be 0–168');
     if (maxPerDay != null && !(Number.isInteger(maxPerDay) && maxPerDay > 0 && maxPerDay <= 24)) throw Error('maxPerDay must be 1–24');
+    const list = v => (Array.isArray(v) ? v : []).map(a => text(a, 40)).filter(Boolean);
     return once(requestId, () => {
-      const prev = q('SELECT * FROM medications WHERE name=?').get(n);
+      const prev = medicationId ? q('SELECT * FROM medications WHERE id=?').get(medicationId) : q('SELECT * FROM medications WHERE name=?').get(n);
+      if (medicationId && !prev) throw Error('没有这个药箱条目（medicationId 从 meds 的 cabinet 里取）');
       const id = prev?.id ?? 'med_' + randomUUID();
-      const row = [id, n, JSON.stringify((Array.isArray(aliases) ? aliases : []).map(a => text(a, 40)).filter(Boolean)),
-        JSON.stringify((Array.isArray(forMembers) ? forMembers : []).map(a => text(a, 40)).filter(Boolean)), text(dose, 80),
-        minIntervalHours == null ? (prev?.min_interval_hours ?? null) : Number(minIntervalHours), maxPerDay ?? prev?.max_per_day ?? null,
-        text(note, 300) || prev?.note || null, active ? 1 : 0, now().toISOString()];
+      const finalName = n || prev.name;
+      const finalAliases = aliases === undefined ? JSON.parse(prev?.aliases ?? '[]') : list(aliases);
+      for (const other of q('SELECT * FROM medications WHERE id<>?').all(id)) {
+        const taken = [other.name, ...JSON.parse(other.aliases)];
+        const clash = [finalName, ...finalAliases].find(x => taken.includes(x));
+        if (clash) throw Error(`「${clash}」已经是药箱里「${other.name}」的名字或别名；要改那一条就带 medicationId=${other.id}`);
+      }
+      const keep = (v, col, f = x => x) => (v === undefined ? (prev?.[col] ?? null) : v == null ? null : f(v));
       // A month-only expiry (as printed on many boxes) means the last day of that month.
-      const expDay = expiresOn == null ? (prev?.expires_on ?? null)
-        : expiresOn.length === 7 ? plusDays(plusDays(`${expiresOn}-01`, 40).slice(0, 7) + '-01', -1) : expiresOn;
-      const extra = [text(ingredient, 40) || prev?.ingredient || null, text(strength, 40) || prev?.strength || null,
-        form ?? prev?.form ?? null, expDay, ruleSource ?? prev?.rule_source ?? null];
+      const expDay = keep(expiresOn, 'expires_on', e => e.length === 7 ? plusDays(plusDays(`${e}-01`, 40).slice(0, 7) + '-01', -1) : e);
+      const row = [id, finalName, JSON.stringify(finalAliases),
+        forMembers === undefined ? (prev?.for_members ?? '[]') : JSON.stringify(list(forMembers)),
+        dose === undefined ? (prev?.dose ?? '') : text(dose, 80),
+        keep(minIntervalHours, 'min_interval_hours', Number), keep(maxPerDay, 'max_per_day'),
+        keep(note, 'note', v => text(v, 300) || null), active === undefined ? (prev?.active ?? 1) : active ? 1 : 0, now().toISOString(),
+        keep(ingredient, 'ingredient', v => text(v, 40) || null), keep(strength, 'strength', v => text(v, 40) || null),
+        keep(form, 'form'), expDay, keep(ruleSource, 'rule_source')];
       q(`INSERT INTO medications(id,name,aliases,for_members,dose,min_interval_hours,max_per_day,note,active,updated_at,
-           ingredient,strength,form,expires_on,rule_source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET aliases=excluded.aliases,
-         for_members=excluded.for_members, dose=excluded.dose, min_interval_hours=excluded.min_interval_hours,
+           ingredient,strength,form,expires_on,rule_source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,
+         aliases=excluded.aliases, for_members=excluded.for_members, dose=excluded.dose, min_interval_hours=excluded.min_interval_hours,
          max_per_day=excluded.max_per_day, note=excluded.note, active=excluded.active, updated_at=excluded.updated_at,
          ingredient=excluded.ingredient, strength=excluded.strength, form=excluded.form, expires_on=excluded.expires_on,
-         rule_source=excluded.rule_source`).run(...row, ...extra);
-      return { ok: true, created: !prev, medication: medRow(q('SELECT * FROM medications WHERE id=?').get(id)) };
+         rule_source=excluded.rule_source`).run(...row);
+      // Doses this entry already owns follow a rename; doses said before the box was registered now find it.
+      q('UPDATE doses SET medication_name=? WHERE medication_id=?').run(finalName, id);
+      const linked = relinkDoses();
+      return { ok: true, created: !prev, medication: medRow(q('SELECT * FROM medications WHERE id=?').get(id)),
+        ...(linked.length ? { dosesLinked: linked } : {}) };
     });
+  }
+  // Doses not yet matched to the cabinet (said before the box was registered, or ambiguous then) are tried again.
+  function relinkDoses() {
+    const out = [];
+    for (const d of q('SELECT * FROM doses WHERE medication_id IS NULL AND voided_at IS NULL').all()) {
+      const said = d.said_as ?? d.medication_name;
+      const { med, match } = findMed(said);
+      if (!med) continue;
+      q('UPDATE doses SET medication_id=?, medication_name=?, match=?, said_as=? WHERE id=?').run(med.id, med.name, match, said, d.id);
+      out.push({ doseId: d.id, said, medication: med.name });
+    }
+    return out;
   }
   // Which cabinet entry a reported dose is. The exact name or an alias decides; otherwise the active
   // ingredient may, but only when it leaves ONE entry (布洛芬 with both 普通 and 缓释 at home → ambiguous).
@@ -270,9 +303,9 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
     }
     const { med, match, candidates } = findMed(name);
     const id = 'dose_' + randomUUID();
-    q('INSERT INTO doses(id,medication_id,medication_name,member_id,taken_at,amount,source,source_event_id,note,match) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    q('INSERT INTO doses(id,medication_id,medication_name,member_id,taken_at,amount,source,source_event_id,note,match,said_as) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
       .run(id, med?.id ?? null, med?.name ?? name, memberId, new Date(at).toISOString(),
-        text(amount, 60) || null, source, sourceEventId ?? null, text(note, 200) || null, match);
+        text(amount, 60) || null, source, sourceEventId ?? null, text(note, 200) || null, match, name);
     return { ok: true, id, medication: med?.name ?? name, inCabinet: !!med, match, ...(candidates.length ? { candidates } : {}), duplicate: false };
   }
   // Per member: last dose of each medicine, when the next is allowed, how many in the last 24h.
@@ -305,6 +338,46 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
     }
     return { ok: true, cabinet, recent: status,
       note: '间隔是按已记录的服药和药箱登记的规则算的，不是建议再吃一剂，也不是医嘱；缺信息就是无法判断，拿不准问医生或看说明书' };
+  }
+
+  // The user corrects a recorded dose: wrong amount, wrong time, wrong medicine, or it never happened.
+  // Only on the user's words (quoted in userWords); the old values go to dose_edits, a removed dose stays traceable.
+  function fixDose({ doseId, amount, takenAt, medication, remove = false, userWords, by, requestId } = {}) {
+    const words = text(userWords, 200);
+    if (words.length < 2) throw Error('userWords: quote what the user said to correct this dose');
+    if (!remove && amount === undefined && takenAt === undefined && medication === undefined) throw Error('say what to change: amount, takenAt, medication, or remove:true');
+    return once(requestId, () => {
+      const d = q('SELECT * FROM doses WHERE id=? AND voided_at IS NULL').get(doseId ?? '');
+      if (!d) throw Error('没有这次服药记录（doseId 从 timeline 里取）');
+      const before = { medication: d.medication_name, takenAt: d.taken_at, amount: d.amount };
+      const log = (action, after) => q('INSERT INTO dose_edits VALUES(?,?,?,?,?,?,?,?)').run('dedit_' + randomUUID(), d.id, now().toISOString(),
+        text(by, 40) || null, action, JSON.stringify(before), after ? JSON.stringify(after) : null, words);
+      if (remove) {
+        q('UPDATE doses SET voided_at=?, void_reason=? WHERE id=?').run(now().toISOString(), words, d.id);
+        q('UPDATE dose_links SET removed_at=? WHERE dose_id=? AND removed_at IS NULL').run(now().toISOString(), d.id);
+        log('remove', null);
+        return { ok: true, doseId: d.id, removed: true, was: before };
+      }
+      let at = d.taken_at;
+      if (takenAt !== undefined) {
+        const ms = Date.parse(takenAt);
+        if (!Number.isFinite(ms)) throw Error('takenAt must be an ISO time with offset');
+        if (ms > now().getTime() + 5 * 60000) throw Error('takenAt is in the future');
+        at = new Date(ms).toISOString();
+      }
+      let medId = d.medication_id, medName = d.medication_name, match = d.match, said = d.said_as;
+      if (medication !== undefined) {
+        said = text(medication, 60);
+        if (!said) throw Error('medication must not be empty');
+        const f = findMed(said);
+        medId = f.med?.id ?? null; medName = f.med?.name ?? said; match = f.match;
+      }
+      const amt = amount === undefined ? d.amount : text(amount, 60) || null;
+      q('UPDATE doses SET taken_at=?, amount=?, medication_id=?, medication_name=?, match=?, said_as=? WHERE id=?').run(at, amt, medId, medName, match, said, d.id);
+      const after = { medication: medName, takenAt: at, amount: amt };
+      log('edit', after);
+      return { ok: true, doseId: d.id, was: before, now: { ...after, inCabinet: !!medId } };
+    });
   }
 
   // A retraction from statebar: the row stays (traceable) and drops out of every view.
@@ -422,6 +495,9 @@ export function createHomeStock({ database, now = () => new Date(), timeZone = '
     return { ok: true, from, members: Object.values(byMember), note: '时长没说的不计入分钟数；运动只来自用户说过的话（经 statebar 核对）' };
   }
 
-  return { pantryAdd, pantryUse, useRow, itemRow, pantryDiscard, pantryEdit, pantry, recentlyGone, medSave, logDose, meds, logSymptom, linkDose, unlinkDose,
+  // Doses said before their box was registered (under an alias the box now has) find it on start.
+  relinkDoses();
+
+  return { pantryAdd, pantryUse, useRow, itemRow, pantryDiscard, pantryEdit, pantry, recentlyGone, medSave, logDose, fixDose, meds, logSymptom, linkDose, unlinkDose,
     timeline, logWorkout, workouts };
 }
