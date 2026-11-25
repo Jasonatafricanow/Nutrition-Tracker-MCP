@@ -210,6 +210,15 @@
     .household-card .mini { display:flex; flex-wrap:wrap; gap:7px 12px; font-size:12px; line-height:1.7; }
     .household-card .mini span { color:var(--muted); }
     .household-card p { font-size:12px; margin:10px 0 0; }
+    .inv-form { grid-template-columns: 1.4fr 1.2fr 1fr 1fr auto; margin: 4px 0 18px; }
+    .inv-priority { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .inv-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--rule); border-radius: 2px; font-size: 12px; background: var(--paper-2); }
+    .inv-check { color: var(--accent); border-color: var(--accent); }
+    .inv-use_soon { color: var(--lv-high); border-color: var(--lv-high); }
+    .inv-ok { color: var(--lv-low); }
+    .inv-unknown { color: var(--ink-2); }
+    .inv-actions { display: inline-flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+    @media (max-width: 720px) { .inv-form { grid-template-columns: 1fr 1fr; } .inv-form .field:first-child { grid-column: 1 / -1; } }
     /* 首屏错落渐入 */
     .reveal { animation: rise .6s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--i, 0) * 60ms); }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
@@ -295,6 +304,36 @@
       <div class="c5 reveal advanced-only" style="--i:5">
         <div class="sec-head"><h2><i>iv.</i>补剂</h2><span class="aside" id="supp-count"></span></div>
         <div id="supp-list"></div>
+      </div>
+    </section>
+
+    <!-- 家庭食材库存：在日常与专业视图均可见，仅做决策参考，不写入营养账本 -->
+    <section id="inventory-panel" class="reveal hidden" style="--i:5">
+      <div class="sec-head">
+        <h2>家庭食材库存</h2>
+        <span class="aside" id="inventory-summary">数量为开放描述，保鲜仅供安排使用顺序 · 不写入营养账本</span>
+      </div>
+      <div id="inventory-priority" class="inv-priority hidden"></div>
+      <form id="inventory-form" class="form-row inv-form">
+        <label class="field">采购入库食材<input name="name" required maxlength="80" placeholder="黄瓜 / 鲜牛奶"></label>
+        <label class="field">数量描述（可空）<input name="quantity" maxlength="200" placeholder="约4根 / 600g"></label>
+        <label class="field">储存方式
+          <select name="storage">
+            <option value="">按常见方式</option>
+            <option value="fridge">冷藏</option>
+            <option value="freezer">冷冻</option>
+            <option value="room">常温</option>
+            <option value="unknown">暂不指定</option>
+          </select>
+        </label>
+        <label class="field">包装到期（可选）<input name="labelExpiryDate" type="date"></label>
+        <button class="btn">入库</button>
+      </form>
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>食材</th><th>余量</th><th>储存</th><th>保鲜参考</th><th class="r">操作</th></tr></thead>
+          <tbody id="inventory-tbody"></tbody>
+        </table>
       </div>
     </section>
 
@@ -802,6 +841,102 @@
     refreshHousehold();
     setInterval(refreshHousehold,30000);
 
+    // ---------- 家庭食材库存 ----------
+    function renderInventory(data) {
+      if (!data?.current) return;
+      $('inventory-panel').classList.remove('hidden');
+      const items = data.current.items || [];
+      const pri = data.expiring?.priority || [];
+      const priEl = $('inventory-priority');
+      if (pri.length) {
+        priEl.classList.remove('hidden');
+        priEl.innerHTML = `<span class="small muted" style="align-self:center">优先安排：</span>` + pri.slice(0, 8).map(r => {
+          const f = r.freshness || {};
+          const left = f.daysLeft != null ? (f.daysLeft < 0 ? `超期 ${-f.daysLeft} 天` : f.daysLeft === 0 ? '今天到期' : `约 ${f.daysLeft} 天`) : '';
+          return `<span class="inv-badge inv-${esc(f.status || 'unknown')}"><b>${esc(r.name)}</b> ${esc(r.remainingQuantity || '')}${left ? ` · ${esc(left)}` : ''}</span>`;
+        }).join('');
+      } else {
+        priEl.classList.add('hidden');
+        priEl.innerHTML = '';
+      }
+      $('inventory-summary').textContent = `在库 ${items.length} 种 · 数量为开放描述，保鲜仅供安排顺序`;
+      $('inventory-tbody').innerHTML = items.length ? items.map(it => {
+        const f = it.freshness || { status: 'unknown', label: '状态未知', note: '' };
+        const stLabel = (it.summary.match(/（([^，)]+)/) || [])[1] || '—';
+        const refText = [f.label, f.useByDate ? `参考至 ${f.useByDate}` : ''].filter(Boolean).join(' · ');
+        return `<tr>
+          <td><b>${esc(it.name)}</b>${it.batchCount > 1 ? ` <small class="muted">${it.batchCount} 批</small>` : ''}</td>
+          <td>${esc((it.remaining || []).join('；') || '数量未说明')}</td>
+          <td class="muted">${esc(stLabel)}</td>
+          <td class="inv-${esc(f.status)}" title="${esc(f.note || '')}">${esc(refText)}</td>
+          <td class="r"><span class="inv-actions">
+            <button type="button" class="linkbtn" data-inv-act="consume" data-inv-name="${esc(it.name)}">消耗</button>
+            <button type="button" class="linkbtn" data-inv-act="used_all" data-inv-name="${esc(it.name)}">用完</button>
+            <button type="button" class="linkbtn" data-inv-act="adjust" data-inv-name="${esc(it.name)}">改余量</button>
+            <button type="button" class="linkbtn" data-inv-act="discard" data-inv-name="${esc(it.name)}">丢弃</button>
+          </span></td>
+        </tr>`;
+      }).join('') : `<tr><td colspan="5" class="muted" style="padding:20px 0">暂无在库食材记录，可在上方登记采购入库或直接告诉 Agent。</td></tr>`;
+    }
+    async function invPost(payload) {
+      if (!connected) return toast("未连接服务端，操作未执行");
+      try {
+        const csrf = await sessionToken();
+        const r = await fetch("/api/inventory", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Nutrition-CSRF": csrf },
+          body: JSON.stringify({ requestId: "ui-inv-" + Date.now() + "-" + Math.random().toString(36).slice(2), ...payload })
+        });
+        const body = await r.json();
+        if (!r.ok) { toast(body.error || `请求失败 ${r.status}`); return null; }
+        await refreshInventory();
+        return body;
+      } catch (e) { toast("请求失败：" + e.message); return null; }
+    }
+    async function refreshInventory() {
+      try {
+        const res = await fetch("/api/inventory");
+        if (res.status === 404) return;
+        if (!res.ok) return;
+        renderInventory(await res.json());
+      } catch {}
+    }
+    $("inventory-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const payload = { operation: "purchase", name: f.name.value.trim(), source: "user_text" };
+      if (f.quantity.value.trim()) payload.quantity = f.quantity.value.trim();
+      if (f.storage.value) payload.storage = f.storage.value;
+      if (f.labelExpiryDate.value) payload.labelExpiryDate = f.labelExpiryDate.value;
+      const res = await invPost(payload);
+      if (res?.ok) { f.reset(); toast(`已入库：${payload.name}`); }
+    });
+    $("inventory-tbody").addEventListener("click", async (e) => {
+      const btn = e.target.closest("button[data-inv-act]");
+      if (!btn) return;
+      const act = btn.dataset.invAct, name = btn.dataset.invName;
+      if (act === "used_all") {
+        const r = await invPost({ operation: "consume", name, usedAll: true });
+        if (r?.ok) toast(`已标记用完：${name}`);
+      } else if (act === "consume") {
+        const used = prompt(`本次用了多少「${name}」？（如 两根 / 200g；留空表示部分使用）`);
+        if (used === null) return;
+        const r = await invPost({ operation: "consume", name, ...(used.trim() ? { usedQuantity: used.trim() } : {}) });
+        if (r?.ok) toast(`已扣减：${name}`);
+      } else if (act === "adjust") {
+        const rem = prompt(`「${name}」实际还剩多少？（开放描述，如 约剩2根 / 半袋）`);
+        if (rem === null || !rem.trim()) return;
+        const r = await invPost({ operation: "adjust", name, remainingQuantity: rem.trim() });
+        if (r?.ok) toast(`已更正余量：${name}`);
+      } else if (act === "discard") {
+        const reason = prompt(`确认丢弃最旧批次的「${name}」？可填写原因（如 坏了，留空也可）`);
+        if (reason === null) return;
+        const r = await invPost({ operation: "discard", name, ...(reason.trim() ? { reason: reason.trim() } : {}) });
+        if (r?.ok) toast(`已记录丢弃：${name}`);
+      }
+    });
+    refreshInventory();
+
     // ---------- SSE ----------
     function setConn(ok) {
       connected = ok;
@@ -814,6 +949,7 @@
     const es = new EventSource("/api/stream");
     es.onopen = () => setConn(true);
     es.onmessage = (e) => render(JSON.parse(e.data));
+    es.addEventListener("inventory", (e) => renderInventory(JSON.parse(e.data)));
     es.onerror = () => setConn(false); // EventSource 自动重连
   </script>
 </body>
