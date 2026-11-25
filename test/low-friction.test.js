@@ -102,7 +102,7 @@ test('family health webhook requires member attribution and updates only that me
   assert.equal(unauthorized.status,401);
   const routed=await fetch(`http://127.0.0.1:${port}/api/mcp-dispatch`,{method:'POST',headers:{'Content-Type':'application/json','X-Nutrition-CSRF':csrf},body:JSON.stringify({memberId:'alice',tool:'get_meal_history',args:{}})});
   assert.equal(routed.status,200);
- }finally{proc.kill();f.close();}
+ }finally{proc.kill();await new Promise(r=>{if(proc.exitCode!==null||proc.signalCode!==null)return r();proc.once('exit',r);setTimeout(r,1500).unref()});f.close();}
 });
 test('Dashboard offers reversible everyday view and direct correction affordance',async()=>{
  const {readFileSync}=await import('node:fs');

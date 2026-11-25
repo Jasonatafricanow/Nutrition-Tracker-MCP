@@ -5,6 +5,9 @@ import { createServer } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 async function freePort(){return new Promise((resolve,reject)=>{const s=createServer();s.once('error',reject);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});}
 async function setupServer(withWebhookToken=true){
@@ -15,11 +18,11 @@ async function setupServer(withWebhookToken=true){
   delete env.NUTRITION_API_TOKEN;
   delete env.HEALTH_WEBHOOK_TOKEN;
   if(withWebhookToken) env.HEALTH_WEBHOOK_TOKEN='test-secret-not-for-production';
-  const child=spawn(process.execPath,['server.js','--no-stdio'],{cwd:path.dirname(new URL(import.meta.url).pathname)+'/..',env,stdio:['ignore','ignore','pipe']});
+  const child=spawn(process.execPath,[path.join(root,'server.js'),'--no-stdio'],{cwd:root,env,stdio:['ignore','ignore','pipe']});
   let stderr='';child.stderr.on('data',d=>stderr+=d.toString());
   for(let i=0;i<80;i++) {
     if(child.exitCode!==null)throw Error('HTTP service exited: '+stderr);
-    try{const r=await fetch(url+'/api/snapshot');if(r.ok)return {url,child,dir,close(){child.kill();rmSync(dir,{recursive:true,force:true});}};}catch{}
+    try{const r=await fetch(url+'/api/snapshot');if(r.ok)return {url,child,dir,async close(){child.kill();await new Promise(r=>{if(child.exitCode!==null||child.signalCode!==null)return r();child.once('exit',r);setTimeout(r,1500).unref()});rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:200});}};}catch{}
     await new Promise(r=>setTimeout(r,40));
   }
   child.kill();rmSync(dir,{recursive:true,force:true});throw Error('HTTP server start timeout: '+stderr);
@@ -41,7 +44,7 @@ test('HTTP rejects unauthenticated and cross-origin writes but permits same-orig
    assert.equal(accepted.status,200);
    const snap=await (await fetch(s.url+'/api/snapshot')).json();
    assert.equal(snap.profile.goal_kcal,-700);
- } finally{s.close();}
+ } finally{await s.close();}
 });
 
 test('webhook requires bearer token and deduplicates historical measurements',async()=>{
@@ -53,11 +56,11 @@ test('webhook requires bearer token and deduplicates historical measurements',as
    const data=await first.json();assert.equal(data.ledgerDate,'2025-01-02');
    const second=await post(s.url,'/api/health-webhook',payload,h);assert.equal(second.status,200);
    assert.equal((await second.json()).duplicate,true);
- }finally{s.close();}
+ }finally{await s.close();}
 });
 
 test('webhook endpoint is disabled if token is not configured',async()=>{
  const s=await setupServer(false);try{
    const r=await post(s.url,'/api/health-webhook',{weightKg:75});assert.equal(r.status,503);
- }finally{s.close();}
+ }finally{await s.close();}
 });

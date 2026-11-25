@@ -6,8 +6,8 @@
 
 - 宿主 LLM：理解用户饮食、识别食物照片、估算且标注不确定性、必要时追问、请求用户对照片预览作一次确认。
 - Nutrition：确定性校验、SQLite 账本、食材 ID 查验、版本修订、幂等、来源记录、报告计算、照片草稿确认。
-- 默认只发现两个工具：`nutrition_query` 和 `nutrition_execute`。不要寻找 `get_agent_context` / `log_meal_items` / `get_agent_workflow` 等历史工具。
-- 日常会话中仅允许下述 **3 个 view + 5 个 operation**。可按需读取 MCP Prompt `nutrition_agent_workflow`；照片任务可额外读取 `estimate_meal_photo` Prompt。
+- 默认发现四个工具：营养的 `nutrition_query` / `nutrition_execute`，加上家庭食材库存的 `inventory_query` / `inventory_update`。不要寻找 `get_agent_context` / `log_meal_items` / `get_agent_workflow` 等历史工具。
+- 营养日常会话中仅允许下述 **3 个 view + 5 个 operation**；库存另有 4 个查询 view 与 5 个更新 operation（见「家庭食材库存」一节）。可按需读取 MCP Prompt `nutrition_agent_workflow`；照片任务可额外读取 `estimate_meal_photo` Prompt。
 
 ## 查询：nutrition_query
 
@@ -87,6 +87,50 @@ nutrition_execute({operation:"health",memberId:"adult_a",args:{sleepHours:6.5,rh
 4. 仅在同意之后，传 `photo_confirm` 所需 `draftId`、完整 `decisions`、真实 `confirmationEvidence` 和防重 `requestId`，由现有引擎原子入账。
 
 不得把图片走 `meal` 的文字估算捷径，也不得先入账再向用户索要确认。底层更细的 `decisions` 结构详见 [照片编译协议](PHOTO_ESTIMATION_PROTOCOL.md)，无需让用户逐项填写 JSON。
+
+## 家庭食材库存：inventory_query / inventory_update
+
+库存是**决策辅助**，不是精确仓储系统：让 Agent 知道家里有什么、大致剩多少、先用什么、还缺什么。小票 OCR、自然语言理解、菜单生成与采购决策全部由宿主 Agent 完成；MCP 只存状态。
+
+### 什么时候查询（inventory_query）
+
+| view | 什么时候用 | 关键字段 |
+| --- | --- | --- |
+| `current` | 提菜单/采购建议前，了解家里有什么 | `includeUsedUp?`（默认只列在库） |
+| `item` | 查某种食材的批次与最近变更 | `name` |
+| `expiring` | 安排优先使用顺序 | `withinDays?`（默认 3） |
+| `availability` | 生成菜单前核对具体食材够不够 | `names:[...]`（1–12 个） |
+
+### 什么时候更新（inventory_update，一个入口五种 operation）
+
+| operation | 触发条件（必须是用户实际报告的事件） | 关键字段 |
+| --- | --- | --- |
+| `purchase` | 用户买了菜：小票识别或口头说明 | `name`、`quantity?`、`quantityNote?`、`purchasedAt?`、`storage?`、`source:"receipt"\|"user_text"`、`sourceRef?`、`requestId` |
+| `consume` | 用户说**已经做完饭/已经用了** | `name` 或 `batchId`、`usedQuantity?` / `remainingQuantity?` / `usedAll?` |
+| `discard` | 用户主动报告丢弃、变质 | `name`、`reason?` |
+| `adjust` | 用户修正数量或状态，**覆盖 Agent 推断** | `remainingQuantity?`、`quantityNote?`、`status?` |
+| `update_condition` | 储存方式、开封、切割、包装有效期变化 | `storage?`、`storageChangedAt?`（已知的实际变化日期，默认报告日）、`opened?`、`cut?`、`labelExpiryDate?`（传 `null` 清除错误日期） |
+
+示例（小票 + 用户补充 + 实际消耗）：
+
+~~~js
+inventory_update({operation:"purchase",name:"黄瓜",quantity:"600g",source:"receipt",sourceRef:"receipt-20261116",requestId:"buy-1"})
+inventory_update({operation:"adjust",name:"黄瓜",quantityNote:"实际是四根",requestId:"buy-1-note"})
+// 采购记录保留 originalQuantity: "600g" 和 quantitySupplements: ["实际是四根"]
+inventory_update({operation:"consume",name:"黄瓜",usedQuantity:"两根",requestId:"cook-1"})
+// 当前 remainingQuantity: "约2根"，remainingQuantityBasis: "inferred"，余重未知
+inventory_update({operation:"adjust",name:"黄瓜",remainingQuantity:"2根",requestId:"restate-1"})
+~~~
+
+### 必须遵守的边界
+
+1. **推荐菜单 ≠ 消耗**。提出菜单、用户同意菜单、用户说「黄瓜不够」都不扣库存；只有用户明确说做完了/用了/扔了才写 `consume`/`discard`。
+2. **用户判断优先**。用户说黄瓜小不够做拍黄瓜，Agent 直接换菜，不得要求称重，不得用库存数字反驳。
+3. **开放式数量**。`500g`、`2根`、`一小把`、`半袋`、`一些` 都可原样保存。明确、可比较的同单位用量可推断近似余量。遇到跨单位、模糊数量或数量冲突时记为余量未知。用户直接报告的余量优先，采购信息留在批次记录。
+4. **保质期用于安排使用顺序**。包装标注日期（`labelExpiryDate`）优先。估算结合储存变化日期和开封、切割状态，冷冻保留此前临期或应检查的优先级，解冻结合冷冻前剩余期限。依据不足时显示「状态未知」或「建议优先检查」。
+5. **营养记录不重复建设**。做完饭后如需记录摄入，继续用 `nutrition_execute(operation:"meal")`；库存更新绝不写营养账本。
+6. **幂等与批次**。每个用户事件用稳定 `requestId`。明确指定 `batchId` 时按指定批次更新，其余默认分配给最早在库批次，并标记 `batchSelectionInferred`。库存总量判断足够时无需追问批次。
+7. 库存为家庭共享（不按成员分库）；数据存于独立轻量 SQLite（`INVENTORY_DB_PATH` 可覆盖），不改动现有营养数据库。
 
 ## 专业模式、兼容与权限边界
 
