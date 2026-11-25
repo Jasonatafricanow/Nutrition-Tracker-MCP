@@ -224,14 +224,25 @@
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
     @media (prefers-reduced-motion: reduce) { .reveal { animation: none; } .bar i { transition: none; } }
     /* 家庭面板统一顶栏（同步自 panel-base v1） */
+    :root {
+      --pb-accent:#1F6FEB;--pb-hub-bg:#16191D;--pb-hub-ink:#E9ECEF;--pb-hub-on:#2B3138;
+      --pb-font:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+      --pb-mono:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,"SF Mono",Menlo,monospace;
+      --pb-fs:14px;--pb-r:6px;
+    }
+    @media (prefers-color-scheme:dark) {
+      :root:not([data-theme="light"]) { --pb-accent:#4C8DFF;--pb-hub-bg:#0B0D0F;--pb-hub-ink:#E6E9EC;--pb-hub-on:#23272C; }
+    }
+    :root[data-theme="dark"] { --pb-accent:#4C8DFF;--pb-hub-bg:#0B0D0F;--pb-hub-ink:#E6E9EC;--pb-hub-on:#23272C; }
     .pb-hub{position:sticky;top:0;z-index:1000;display:flex;flex-wrap:nowrap;margin:0;border:0;align-items:center;gap:2px;height:40px;padding:0 16px;
-      background:#16191D;color:#E9ECEF;font:400 14px system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;overflow-x:auto;scrollbar-width:none}
+      background:var(--pb-hub-bg);color:var(--pb-hub-ink);font:400 var(--pb-fs) var(--pb-font);overflow-x:auto;scrollbar-width:none}
     .pb-hub::-webkit-scrollbar{display:none}
     .pb-hub b{font-weight:600;margin-right:12px;white-space:nowrap}
-    .pb-hub a{color:inherit!important;text-decoration:none!important;border:0!important;padding:5px 10px;border-radius:6px;opacity:.7;white-space:nowrap}
-    .pb-hub a:hover{opacity:1;background:#2B3138}
-    .pb-hub a[aria-current]{opacity:1;background:#2B3138;font-weight:600}
-    .pb-hub a:focus-visible{outline:2px solid #4C8DFF;outline-offset:1px}
+    .pb-hub a{color:inherit!important;text-decoration:none!important;border:0!important;padding:5px 10px;border-radius:var(--pb-r);opacity:.7;white-space:nowrap}
+    .pb-hub a:hover{opacity:1;background:var(--pb-hub-on)}
+    .pb-hub a[aria-current]{opacity:1;background:var(--pb-hub-on);font-weight:600}
+    .pb-hub a:focus-visible{outline:2px solid var(--pb-accent);outline-offset:1px}
+    .pb-num{font-family:var(--pb-mono);font-variant-numeric:tabular-nums}
     @media (max-width:480px){.pb-hub{padding:0 4px}.pb-hub b{display:none}.pb-hub a{padding:5px 6px}}
   </style>
 </head>

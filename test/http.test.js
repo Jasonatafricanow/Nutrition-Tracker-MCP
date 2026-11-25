@@ -69,7 +69,11 @@ test('HTTP inventory endpoints guard writes, update stock without touching nutri
  const s=await setupServer();try{
    const html=await (await fetch(s.url+'/')).text();
    assert.match(html,/id="inventory-panel"/);
-   assert.match(html,/class="pb-hub"/);
+   assert.match(html,/<nav class="pb-hub" aria-label="家里的面板">/);
+   for(const [k,href] of [['chat','/app/piweb/chat'],['manage','/app/piweb/manage'],['workbench','/app/workbench/'],['nutrition','/app/nutrition/'],['stock','/app/stock/'],['proxy','/app/proxypanel/']]){
+     assert.match(html,new RegExp(`<a href="${href}" data-k="${k}"${k==='nutrition'?' aria-current="page"':''}>`));
+   }
+   assert.match(html,/--pb-hub-bg:#0B0D0F/);
    assert.equal((await post(s.url,'/api/inventory',{operation:'purchase',name:'黄瓜',quantity:'四根'})).status,401);
    const csrf=(await (await fetch(s.url+'/api/session')).json()).csrfToken;
    assert.equal((await post(s.url,'/api/inventory',{operation:'purchase',name:'黄瓜'},{'X-Nutrition-CSRF':csrf,Origin:'https://untrusted.example'})).status,403);
