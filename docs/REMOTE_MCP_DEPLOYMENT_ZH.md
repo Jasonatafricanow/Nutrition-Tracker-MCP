@@ -112,7 +112,7 @@ mcp.example.com {
 }
 ```
 
-实际 JSON 键名随 Agent 宿主而异，不要将上面的配置直接套到只支持 stdio 或 OAuth 的宿主。对于支持自定义 HTTP 标头的客户端，按对应配置填 URL 与安全保存的 Token。连接后应看到**默认仅两个工具**：`nutrition_query` 与 `nutrition_execute`；使用 `nutrition_query({view:"summary",period:"today"})` 做只读联通验证。参数规范见 [当前 Agent 契约](AGENT_CONTRACT_ZH.md)。
+实际 JSON 键名随 Agent 宿主而异，不要将上面的配置直接套到只支持 stdio 或 OAuth 的宿主。对于支持自定义 HTTP 标头的客户端，按对应配置填 URL 与安全保存的 Token。默认工具为 `nutrition_query`、`nutrition_execute`、`inventory_query` 和 `inventory_update`。使用 `nutrition_query({view:"summary",period:"today"})` 或 `inventory_query({view:"current"})` 验证只读访问。参数规范见 [当前 Agent 契约](AGENT_CONTRACT_ZH.md)。
 
 ## 5. 运维与风险
 

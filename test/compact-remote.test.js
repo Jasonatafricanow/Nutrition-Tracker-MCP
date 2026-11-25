@@ -29,9 +29,19 @@ async function start(){
  return {client,async close(){await client.close();child.kill();await new Promise(r=>{if(child.exitCode!==null||child.signalCode!==null)return r();child.once('exit',r);setTimeout(r,1000).unref()});rmSync(dir,{recursive:true,force:true});}};
 }
 async function call(c,name,args){const r=await c.callTool({name,arguments:args});if(r.isError)throw Error(r.content[0].text);return JSON.parse(r.content[0].text);}
-test('remote family host exposes only two tools; one write returns compact updated state',async()=>{
+test('remote family host exposes nutrition plus inventory tools; one write returns compact updated state',async()=>{
  const s=await start();try{
-  const tools=await s.client.listTools();assert.deepEqual(tools.tools.map(x=>x.name).sort(),['nutrition_execute','nutrition_query']);
+  const tools=await s.client.listTools();assert.deepEqual(tools.tools.map(x=>x.name).sort(),['inventory_query','inventory_update','nutrition_execute','nutrition_query']);
+  const buy=await call(s.client,'inventory_update',{operation:'purchase',name:'猪肉',quantity:'500g',storage:'fridge',requestId:'remote-buy'});
+  const consume={operation:'consume',name:'猪肉',usedQuantity:'200g',requestId:'remote-use'};
+  const used=await call(s.client,'inventory_update',consume);
+  assert.equal(used.batch.remainingQuantity,'约300g');assert.equal(used.batchSelectionInferred,true);
+  assert.equal((await call(s.client,'inventory_update',consume)).duplicate,true);
+  const frozen=await call(s.client,'inventory_update',{operation:'update_condition',batchId:buy.batch.batchId,storage:'freezer',storageChangedAt:buy.batch.purchasedAt});
+  assert.deepEqual(frozen.batch.storageHistory.map(event=>event.storage),['fridge','freezer']);
+  const inventory=await call(s.client,'inventory_query',{view:'item',name:'猪肉'});
+  assert.equal(inventory.item.batches[0].originalQuantity,'500g');
+  assert.equal(inventory.item.batches[0].remainingQuantity,'约300g');
   let r=await call(s.client,'nutrition_execute',{operation:'checkin',memberId:'b',args:{sleepHours:5,rhrBpm:66}});
   assert.equal(r.context.memberId,'b');assert.equal(r.context.health.sleepHours,5);
   r=await call(s.client,'nutrition_query',{view:'household',focus:'health'});

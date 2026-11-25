@@ -30,7 +30,7 @@ async function serverFixture(){
    if(i===99)throw Error('server startup timeout '+log);
    await pause(45);
  }
- return {dir,port,url,child,async close(){child.kill();await pause(80);rmSync(dir,{recursive:true,force:true});}};
+ return {dir,port,url,child,async close(){child.kill();await new Promise(r=>{if(child.exitCode!==null||child.signalCode!==null)return r();child.once('exit',r);setTimeout(r,1500).unref()});rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:200});}};
 }
 test('private webhook batch routes to the specified family member, retries idempotently and reports partial failures',async()=>{
  const f=await serverFixture();
@@ -71,7 +71,7 @@ test('compact MCP exposes typed common input and keeps same two operations with 
  try{
   await client.connect(transport);
   const list=(await client.listTools()).tools;
-  assert.deepEqual(list.map(x=>x.name).sort(),['nutrition_execute','nutrition_query']);
+  assert.deepEqual(list.map(x=>x.name).sort(),['inventory_query','inventory_update','nutrition_execute','nutrition_query']);
   const args=list.find(x=>x.name==='nutrition_execute').inputSchema?.properties?.args;
   assert.equal(args?.type,'object');
   assert.ok(args.properties?.weightGrams);
