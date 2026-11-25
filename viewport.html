@@ -223,9 +223,20 @@
     .reveal { animation: rise .6s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--i, 0) * 60ms); }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
     @media (prefers-reduced-motion: reduce) { .reveal { animation: none; } .bar i { transition: none; } }
+    /* 家庭面板统一顶栏（同步自 panel-base v1） */
+    .pb-hub{position:sticky;top:0;z-index:1000;display:flex;flex-wrap:nowrap;margin:0;border:0;align-items:center;gap:2px;height:40px;padding:0 16px;
+      background:#16191D;color:#E9ECEF;font:400 14px system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;overflow-x:auto;scrollbar-width:none}
+    .pb-hub::-webkit-scrollbar{display:none}
+    .pb-hub b{font-weight:600;margin-right:12px;white-space:nowrap}
+    .pb-hub a{color:inherit!important;text-decoration:none!important;border:0!important;padding:5px 10px;border-radius:6px;opacity:.7;white-space:nowrap}
+    .pb-hub a:hover{opacity:1;background:#2B3138}
+    .pb-hub a[aria-current]{opacity:1;background:#2B3138;font-weight:600}
+    .pb-hub a:focus-visible{outline:2px solid #4C8DFF;outline-offset:1px}
+    @media (max-width:480px){.pb-hub{padding:0 4px}.pb-hub b{display:none}.pb-hub a{padding:5px 6px}}
   </style>
 </head>
 <body>
+  <nav class="pb-hub" aria-label="家里的面板"><b>家里的面板</b><a href="/app/piweb/chat" data-k="chat">溪月</a><a href="/app/piweb/manage" data-k="manage">管理</a><a href="/app/workbench/" data-k="workbench">工作台</a><a href="/app/nutrition/" data-k="nutrition" aria-current="page">家庭健康</a><a href="/app/stock/" data-k="stock">涨停</a><a href="/app/proxypanel/" data-k="proxy">旁路代理</a></nav>
   <div class="wrap">
     <header class="masthead reveal" style="--i:0">
       <div class="masthead-row">
