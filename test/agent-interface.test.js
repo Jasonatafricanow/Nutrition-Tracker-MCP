@@ -85,15 +85,14 @@ async function launch(surface){
  await client.connect(transport);
  return {client,dir,async close(){await client.close();rmSync(dir,{recursive:true,force:true});}};
 }
-test('default real MCP catalog is four tools (nutrition + inventory) and substantially smaller than opt-in legacy catalog',async()=>{
+test('default real MCP catalog is two tools and substantially smaller than opt-in legacy catalog',async()=>{
  const a=await launch('compact'),b=await launch('full');
  try{
   const c=await a.client.listTools(),old=await b.client.listTools();
-  assert.deepEqual(c.tools.map(x=>x.name).sort(),['inventory_query','inventory_update','nutrition_execute','nutrition_query']);
+  assert.deepEqual(c.tools.map(x=>x.name).sort(),['nutrition_execute','nutrition_query']);
   assert.ok(old.tools.length>=25);
   const slim=JSON.stringify(c.tools).length,legacy=JSON.stringify(old.tools).length;
-  // Budget includes the two household-inventory tools added to every surface.
-  assert.ok(slim<legacy*0.40,`catalog did not shrink enough ${slim}/${legacy}`);
+  assert.ok(slim<legacy*0.30,`catalog did not shrink enough ${slim}/${legacy}`);
   const r=await a.client.callTool({name:'nutrition_query',arguments:{view:'foods',queries:['米饭','鸡胸']}});
   assert.equal(r.isError,undefined);assert.equal(JSON.parse(r.content[0].text).results.length,2);
   const w=await a.client.callTool({name:'nutrition_execute',arguments:{operation:'meal',args:{mealSlot:'午餐',items:[{foodId:'f7',weightGrams:150}],requestId:'real-client-1'}}});

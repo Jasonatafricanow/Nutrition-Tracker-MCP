@@ -16,7 +16,6 @@ import {createOpenFoodFactsClient} from "./open-food-facts.js";
 import { z } from "zod";
 import { startRemoteMcp } from "./remote-mcp.js";
 import { createHousehold } from "./household.js";
-import { createInventory, INVENTORY_OPERATIONS, INVENTORY_VIEWS } from "./inventory.js";
 import { createAgentInterface } from "./agent-interface.js";
 import { createEverydayInterface, EVERYDAY_READS, EVERYDAY_WRITES } from "./everyday-interface.js";
 import { COMPACT_AGENT_WORKFLOW } from "./compact-agent-workflow.js";
@@ -37,12 +36,6 @@ const household = process.env.HOUSEHOLD_CONFIG ? createHousehold({
   dir: path.resolve(process.env.HOUSEHOLD_DATA_DIR || path.join(__dirname, "household-data")),
   engineFactory: createEngine
 }) : null;
-// Household food inventory: one shared lightweight DB (family-wide, not per member).
-const INVENTORY_ENABLED = !["0", "false", "no"].includes((process.env.ENABLE_INVENTORY ?? "1").trim().toLowerCase());
-const INVENTORY_DB_PATH = process.env.INVENTORY_DB_PATH || (household
-  ? path.join(path.resolve(process.env.HOUSEHOLD_DATA_DIR || path.join(__dirname, "household-data")), "inventory.db")
-  : path.join(path.dirname(DB_PATH), DEMO ? "inventory_demo.db" : "inventory.db"));
-const inventory = INVENTORY_ENABLED ? createInventory({ dbPath: INVENTORY_DB_PATH }) : null;
 const usda = createUSDAClient();
 const openFoodFacts = createOpenFoodFactsClient();
 const csrfToken = randomBytes(32).toString("hex");
@@ -82,20 +75,9 @@ app.use(express.json({limit:"128kb"}));
 app.use((req,res,next) => { res.setHeader("Cache-Control", "no-store"); next(); });
 
 const sseClients = new Set();
-function inventorySnapshot() {
-  return {
-    current: inventory.query({ view: "current", includeUsedUp: false }),
-    expiring: inventory.query({ view: "expiring", withinDays: 3 }),
-  };
-}
 function broadcast() {
   if (!sseClients.size) return;
   const data = `data: ${JSON.stringify(engine.buildSnapshot())}\n\n`;
-  for (const res of sseClients) res.write(data);
-}
-function broadcastInventory() {
-  if (!inventory || !sseClients.size) return;
-  const data = `event: inventory\ndata: ${JSON.stringify(inventorySnapshot())}\n\n`;
   for (const res of sseClients) res.write(data);
 }
 
@@ -125,36 +107,6 @@ app.get("/api/household", (req,res)=> {
   } catch(e){res.status(400).json({error:e.message});}
 });
 
-app.get("/api/inventory", (req, res) => {
-  if (!inventory) return res.status(404).json({ ok: false, error: "Inventory disabled" });
-  if (!sameOrigin(req)) return res.status(403).json({ ok: false, error: "Origin denied" });
-  try {
-    if (req.query.view) {
-      const args = { view: String(req.query.view) };
-      if (req.query.name !== undefined) args.name = String(req.query.name);
-      if (req.query.names !== undefined) args.names = String(req.query.names).split(",").map((s) => s.trim()).filter(Boolean);
-      if (req.query.withinDays !== undefined) args.withinDays = Number(req.query.withinDays);
-      if (req.query.includeUsedUp !== undefined) args.includeUsedUp = req.query.includeUsedUp === "true";
-      return res.json(inventory.query(args));
-    }
-    res.json({ ok: true, ...inventorySnapshot() });
-  } catch (e) {
-    res.status(400).json({ ok: false, error: e.message });
-  }
-});
-
-app.post("/api/inventory", authorizeDispatch, (req, res) => {
-  if (!inventory) return res.status(404).json({ ok: false, error: "Inventory disabled" });
-  try {
-    const result = inventory.update(req.body ?? {});
-    lastInventoryVersion = inventory.dataVersion();
-    broadcastInventory();
-    res.json(result);
-  } catch (e) {
-    res.status(400).json({ ok: false, error: e.message });
-  }
-});
-
 app.get("/api/stream", (req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -162,7 +114,6 @@ app.get("/api/stream", (req, res) => {
     Connection: "keep-alive"
   });
   res.write(`data: ${JSON.stringify(engine.buildSnapshot())}\n\n`);
-  if (inventory) res.write(`event: inventory\ndata: ${JSON.stringify(inventorySnapshot())}\n\n`);
   sseClients.add(res);
   req.on("close", () => sseClients.delete(res));
 });
@@ -227,14 +178,9 @@ httpServer.on("error", (e) => {
 
 // 别的进程（另一个 MCP 客户端拉起的实例）写库后，这里也推送给观察窗
 let lastVersion = engine.dataVersion();
-let lastInventoryVersion = inventory ? inventory.dataVersion() : null;
 setInterval(() => {
   const v = engine.dataVersion();
   if (v !== lastVersion) { lastVersion = v; broadcast(); }
-  if (inventory) {
-    const iv = inventory.dataVersion();
-    if (iv !== lastInventoryVersion) { lastInventoryVersion = iv; broadcastInventory(); }
-  }
 }, 1000).unref();
 
 // 跨过零点时让观察窗切到新的一天
@@ -407,49 +353,6 @@ function createMcpServer() {
   });
 
   } // full legacy tool surface
-
-  // Household inventory: exactly two tools on EVERY surface (incl. remote MCP).
-  // The Agent owns receipt OCR, language understanding, menus and purchase advice;
-  // these tools only store/query state. A suggested or accepted menu NEVER deducts
-  // stock — only explicit user-reported events do. Nutrition intake stays in the
-  // existing nutrition tools; inventory writes never touch the meal ledger.
-  if (inventory) {
-    mcp.registerTool('inventory_query', {
-      description:'Read household food inventory for meal planning. current = what is at home (open-ended quantities like "600g / 约4根", storage, coarse freshness); item = one food with purchase batches and recent changes; expiring = foods to use first (estimates for prioritization, NOT food-safety verdicts); availability = check 1–12 named foods before proposing a menu. Query before menu/shopping suggestions. Quantities are user/source descriptions, never converted or fabricated.',
-      inputSchema:{
-        view:z.enum(INVENTORY_VIEWS).default('current'),
-        name:z.string().optional().describe('Food name for item view (or single availability check)'),
-        names:z.array(z.string()).min(1).max(12).optional().describe('Food names for availability view'),
-        withinDays:z.number().int().min(0).max(30).default(3).describe('expiring: also include foods estimated usable within N days'),
-        includeUsedUp:z.boolean().default(false).describe('current: also list used-up/discarded foods')
-      }
-    },compactCall(args=>inventory.query(args)));
-    mcp.registerTool('inventory_update', {
-      description:'ONE write entry for household food inventory, only for events the USER actually reported: purchase (receipt or spoken), consume (after cooking ACTUALLY happened), discard (user-reported spoilage/waste), adjust (user correction overrides Agent inference), update_condition (storage/opened/cut/label expiry). Never call for menu proposals, accepted menus or Agent guesses. Quantities stay open text ("四根","半袋","一小把"); do not convert units or invent precision; if the user gives no amount, omit it. Use a stable requestId per user event for idempotency. Nutrition intake is recorded separately via existing nutrition tools.',
-      inputSchema:{
-        operation:z.enum(INVENTORY_OPERATIONS),
-        name:z.string().optional().describe('Food name as the user calls it; matched against stored names/aliases'),
-        batchId:z.string().optional().describe('Target a specific purchase batch when several exist; default is the oldest active batch'),
-        requestId:z.string().optional().describe('Stable unique id per user-reported event; retries with same id+payload are deduplicated'),
-        quantity:z.string().optional().describe('purchase: original amount as written/spoken, e.g. "600g" or "四根"'),
-        quantityNote:z.string().optional().describe('Extra description of the SAME batch, e.g. receipt says 600g, user adds "实际是四根"; kept alongside, never converted'),
-        remainingQuantity:z.string().optional().describe('consume/adjust: user-stated remainder, e.g. "约剩2根"; replaces prior description'),
-        usedQuantity:z.string().optional().describe('consume: actual amount used, e.g. "两根"; comparable same-unit amounts yield an approximate remainder'),
-        usedAll:z.boolean().optional().describe('consume: user says this batch is finished'),
-        reason:z.string().optional().describe('discard: user-stated reason, e.g. "坏了"'),
-        purchasedAt:z.string().optional().describe('purchase: YYYY-MM-DD, defaults to today'),
-        storage:z.enum(['fridge','freezer','room','unknown']).optional().describe('Defaults to a typical storage for known food types (flagged storageAssumed)'),
-        storageChangedAt:z.string().optional().describe('update_condition: actual storage change date YYYY-MM-DD, if known; defaults to the report date'),
-        opened:z.boolean().optional(),cut:z.boolean().optional(),
-        labelExpiryDate:z.string().nullable().optional().describe('Package expiry YYYY-MM-DD; takes precedence over estimates. update_condition: null clears an incorrect label date'),
-        status:z.enum(['active','used_up','discarded']).optional().describe('adjust: explicit user correction of batch state'),
-        source:z.enum(['receipt','user_text','agent_inference']).default('user_text').describe('Provenance of this event; receipt OCR results use "receipt"'),
-        sourceRef:z.string().optional().describe('Optional receipt/event reference linking OCR items to one shopping trip'),
-        aliases:z.array(z.string()).optional().describe('purchase: optional alternative names for a NEW food'),
-        note:z.string().optional()
-      }
-    },compactCall(args=>inventory.update(args)));
-  }
 
   mcp.registerPrompt('nutrition_agent_workflow', {
     title:'Agent-first nutrition logging workflow',
