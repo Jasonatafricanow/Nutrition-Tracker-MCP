@@ -7,7 +7,7 @@
 - 宿主 LLM：理解用户饮食、识别食物照片、估算且标注不确定性、必要时追问、请求用户对照片预览作一次确认。
 - Nutrition：确定性校验、SQLite 账本、食材 ID 查验、版本修订、幂等、来源记录、报告计算、照片草稿确认。
 - 默认只发现两个工具：`nutrition_query` 和 `nutrition_execute`。不要寻找 `get_agent_context` / `log_meal_items` / `get_agent_workflow` 等历史工具。
-- 日常会话中仅允许下述 **3 个 view + 5 个 operation**。可按需读取 MCP Prompt `nutrition_agent_workflow`；照片任务可额外读取 `estimate_meal_photo` Prompt。
+- 日常会话中仅允许下述 **6 个 view + 11 个 operation**。可按需读取 MCP Prompt `nutrition_agent_workflow`；照片任务可额外读取 `estimate_meal_photo` Prompt。
 
 ## 查询：nutrition_query
 
@@ -16,6 +16,16 @@
 | `summary` | 今日情况，7/30 天历史摘要 | `period:"today"|"7d"|"30d"`、`focus:"daily"|"food"|"health"`（仅当天）、`memberId?` |
 | `meals` | 查某日餐食及 mealId/修订版本 | `memberId?`、`date?` |
 | `foods` | 验证本地食材 ID，允许一次查最多六种 | `memberId?`、`queries:["熟米饭","鸡肉"]` |
+| `recipes` | 查已存菜谱及每份营养 | `query?` 或 `recipeId`（单个菜谱含原料、步骤） |
+| `plan` | 看膳食计划与目标差额 | `fromDate?`、`toDate?`（≤14 天）；返回每餐菜谱、目标、已记摄入、计划合计、差额 |
+| `shopping` | 由计划生成采购清单 | `fromDate?`、`toDate?`、`includeLogged?`；按食材条目合并，熟重条目需换算生重 |
+| `pantry` | 冰箱里现在有什么、什么快过期 | `includeGone?`；按到期先后排，带 `expired`、`expiringSoon`（2 天内）；推荐菜和采购清单前先看 |
+| `meds` | 家里药箱、每人上次吃药和下次能吃的时间 | `memberId?`；间隔和上限按药箱登记算，不是医嘱 |
+| `workouts` | 每人这周练了几次、多少分钟、最近做了什么 | `memberId?`、`days?`；运动只来自你说过的话（状态块 → statebar 核对） |
+| `timeline` | 每人的症状和服药按时间并排 | `memberId?`（只看这一位）、`days?`（默认 7）；症状和服药都来自状态块 → statebar；`forSymptom` 只有用户明确说过的关联，时间挨得近不算 |
+| `kitchen` | 排菜单前看家里：冰箱、最近用完的、近 7 天吃过的菜、家里说过的偏好、没做完的菜单 | 冰箱里没记的是「不知道」，不是「没有」 |
+| `menu` | 一个菜单的全貌 | `menuId`；菜、缺料（要买 / 先查家里 / 家里有）、备料和开火顺序、提醒 |
+| `cookbook` | 家里的菜谱：认可过、要留下的菜 | `recipeId?`（看一道）、`query?`；排菜单时用 `{fromRecipe: recipeId}` 整道拿来；和按食品库克数算营养的 `recipes` 是两回事 |
 
 示例（指定家庭成员时须有已知 `memberId`）：
 
@@ -37,6 +47,18 @@ nutrition_query({view:"foods",memberId:"adult_a",queries:["熟米饭","鸡胸肉
 | `health` | 报体重、睡眠、心率等测量 | 按实际 `scaleWeightKg`、`sleepHours`、`rhrBpm` 等来源字段；家庭专项观测需要 `kind` |
 | `photo_stage` | 照片识别后暂存草稿 | `mealSlot`、`estimate`、按真实查询所得 `matches?`；**不入账** |
 | `photo_confirm` | 用户一次整体批准照片候选后入账 | `draftId`、`confirmed:true`、`confirmationEvidence`、`requestId`、`decisions` |
+| `photo_discard` | 关闭指定的未确认照片草稿 | 只要 `draftId`；不入账、不能删除已入账款项；仅关闭这一份草稿 |
+| `recipe_save` | 新建/修改菜谱 | `name`、`servings`、`items:[{foodId,weightGrams}]`（整锅克数）、`steps?`、`note?`；给 `recipeId` 为整体替换 |
+| `plan_set` | 把菜谱排进某天某餐 | `date`、`mealSlot`、`recipeId`、`servings`、`replace?`；可排未来日期，不入账 |
+| `plan_remove` | 删除一条未入账计划项 | `entryId`；不影响账本 |
+| `food_add` | 库里确实没有的食材 | `name`、`aliases?`、`state`（raw/cooked/as_sold）、每100g `p/c/f`、`dataSource`、`requestId`；服务端先查近似条目，有候选就拒绝并返回；逐一核对后带 `reviewedCandidateIds`+`confirmDistinct:true` 才新增；每日上限 10 条 |
+| `food_add`（标签） | 用户给了包装营养成分表（新拍或旧照片） | `label`={`brand`,`name`,`variant?`,`aliases?`,`netAmount?`,`unit` g/ml,`basis` per100/perServing,`servingAmount?`,`energyKj`（按标签原样）,`p/c/f`,`barcode?`}、`requestId`；记账热量用标签能量（kJ÷4.184），不再按三大营养素反算；全家共用同一个 `foodId`，摄入仍各记各的；同条码或同品牌/品名/款式/净含量直接返回已有条目；能量和三大营养素差太多（多半 kcal 当 kJ 或看错基准）会拒绝。识别标签≠吃过，也不进冰箱 |
+| `pantry` | 冰箱：买了什么（小票或口述）、做菜用了、扔了、改一条 | `action`=add/use/discard/edit；add 带 `items:[{name,quantity,shelfLifeDays?|expiresOn?}]`、`source`；use 带 `name`/`itemId` 和 `remaining`（原话，空=用完）。数量照说的记，不求精确 |
+| `med` | 家里药箱登记一种药；或记下用户说的「这次药是因为那个症状吃的」 | 默认 `action`=save：`name`、`aliases?`、`ingredient?`（成分）、`strength?`（规格）、`form?`（普通/缓释/控释/肠溶/其他）、`forMembers?`、`dose`、`minIntervalHours?`、`maxPerDay?`、`ruleSource?`（说明书/医嘱/用户说）、`expiresOn?`；看不清的不填，不替说明书编规则。`action`=link：`doseId`、`episodeId` 或 `symptom`、`userWords`（引用用户原话）；`action`=unlink：`linkId`。`action`=fix：`doseId`、`userWords`（用户纠正的原话）、只带改了的 `amount?`/`takenAt?`/`medication?`；`action`=remove：`doseId`、`userWords`（没吃或记重了）。改和删都留修改记录。补登记规格：同名或带 `medicationId` 再 save，没带的字段保留原值；名字或别名和别的条目重了会拒绝；之前用别名说的服药会自动对上。**新的吃药、症状不在这里写**，经状态块进 statebar；登记药盒不等于吃了 |
+| `menu` | 排菜单、换一道、确认、做完了、作废 | `action`=draft：`dishes:[{name,kind,recipeId?,ingredients:[{name,amount?,foodId?,buy?}],prepMin,cookMin,appliance?,heat,seasoning,doneness,steps?}]`、`serveAt`、`diners?`、`want?:{dishes,soups,must}`、`burners?`；swap：`menuId`+`dishId`+`dish`（只换这一道）；confirm：`menuId`、`plan?:[{memberId,dishId,servings}]`（有菜谱的才能排进 plan）；cooked（用户说做了才写）：`menuId`+`dishIds?`（做了哪几道，默认全部），没菜单就给 `dishes`；冰箱按这几道菜写的用量扣掉，算不了的（没写量、单位对不上）标「剩多少待确认」放在 `pantry.toCheck`，`deduct:false` 不扣；discard：`menuId`。草案和确认都不动冰箱、不记任何人的账 |
+| `kitchen_recipe` | 把认可的菜存进家里的菜谱 | `action`=save：`menuId`+`dishId`（菜单里那道）或 `dish`（整道菜，同菜单里的格式）；已有同名的要带 `recipeId` 才替换；remove：`recipeId` |
+| `kitchen_pref` | 记下家里说过的口味偏好 | `action`=add：`kind`=avoid_main（不做正菜）/not_default（不默认上）/note、`text`；remove：`prefId`。只记用户说过的 |
+| `plan_log` | 用户说吃了计划里的一餐 | `entryId`、`requestId`、`servings?`（实际份数）；按每份克数拆原料入账，未来日期拒绝 |
 
 文字估算：
 
@@ -85,6 +107,7 @@ nutrition_execute({operation:"health",memberId:"adult_a",args:{sleepHours:6.5,rh
 2. `nutrition_execute({operation:"photo_stage",args:{mealSlot,estimate,matches?}})` 返回未入账草稿及简短食物、份量预览。
 3. Agent 向用户展示简短预览并取得一次明确同意或更正。
 4. 仅在同意之后，传 `photo_confirm` 所需 `draftId`、完整 `decisions`、真实 `confirmationEvidence` 和防重 `requestId`，由现有引擎原子入账。
+5. 未确认草稿应继续作为占位提醒保留。只有用户明确表示不要了、记错了或不管它时，才对**指定**草稿调用 `photo_discard`。不得自动丢弃，不得批量丢弃，也不得为了清掉提醒而擅自关闭。`photo_discard` 不会入账，也不能删除已经入账的餐食。
 
 不得把图片走 `meal` 的文字估算捷径，也不得先入账再向用户索要确认。底层更细的 `decisions` 结构详见 [照片编译协议](PHOTO_ESTIMATION_PROTOCOL.md)，无需让用户逐项填写 JSON。
 
@@ -92,7 +115,7 @@ nutrition_execute({operation:"health",memberId:"adult_a",args:{sleepHours:6.5,rh
 
 | MCP_TOOL_SURFACE | 何时启用 |
 | --- | --- |
-| `everyday`（默认） | 日常聊天，三查五写 |
+| `everyday`（默认） | 日常聊天，三查六写 |
 | `compact` | 原 v5.4 调用兼容、主动请求的专业操作（旧 12+18 分支） |
 | `full` | 历史低层工具兼容、专业运维及维护 |
 
@@ -111,3 +134,16 @@ nutrition_execute({operation:"health",memberId:"adult_a",args:{sleepHours:6.5,rh
 ## 稳定性验收
 
 保持 MCP 工具目录、参数枚举、两个兼容 profile、错误拒绝路径、修订与幂等的**契约/回归测试**。这里不需要为架构收缩单独进行模型 Token A/B 评测。测试证明程序行为符合约束，不证明模型对食物的识别一定准确。
+
+## 多个客户端
+
+插件远程 MCP 可以有多个客户端（`MCP_HTTP_TOKEN` 是主 Agent，`MCP_CLIENTS` 里是别的 bot），每个有自己的令牌、名字和范围：
+
+- `full`：日常接口全部能用。
+- `kitchen`：只管全家共用的厨房。能看 `pantry`、`kitchen`、`menu`、`cookbook`、`foods`；能写 `pantry`、`menu`（不能排进个人计划）、`kitchen_pref`、`kitchen_recipe`、`food_add`（只能带包装标签）。看不到、也写不了任何人的饮食、健康、计划和用药。
+
+冰箱和菜单的每次改动都记下是哪个客户端改的（页面上的改动记为「页面」）。客户端名字不是家庭成员：它只说明是谁写的，不说明是谁的身体或账。
+
+```
+MCP_CLIENTS='[{"name":"家人工作bot","token":"<至少 32 字节的随机串>","scope":"kitchen"}]'
+```

@@ -5,6 +5,8 @@
  */
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync } from 'node:fs';
+import { createHomeStock } from './home-stock.js';
+import { createKitchen } from './kitchen.js';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -33,11 +35,20 @@ export function validateHouseholdConfig(config){
   });
 }
 
-export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()}={}){
+// `primary` (optional) names the member whose ledger IS the existing single-person database:
+// that member reuses the main engine, so the Dashboard, legacy callers and the family view
+// share one copy of their data and nothing has to be migrated.
+export function createHousehold({configPath,dir,engineFactory,primaryEngine=null,now=()=>new Date()}={}){
   if(!path.isAbsolute(configPath??'')||!path.isAbsolute(dir??''))throw Error('household paths must be absolute');
   if(typeof engineFactory!=='function')throw Error('engineFactory required');
-  const members=validateHouseholdConfig(JSON.parse(readFileSync(configPath,'utf8')));
+  const config=JSON.parse(readFileSync(configPath,'utf8'));
+  const members=validateHouseholdConfig(config);
   const byId=new Map(members.map(m=>[m.id,m]));
+  const primary=config.primary??null;
+  // What this family calls its assistant (shown on the dashboard: "跟{assistantName}说"). A household note, not code.
+  const assistantName=config.assistantName==null?'助手':typeof config.assistantName==='string'&&config.assistantName.trim()&&config.assistantName.trim().length<=20?config.assistantName.trim():(()=>{throw Error('household assistantName must be 1..20 characters');})();
+  if(primary!==null&&!byId.has(primary))throw Error('household primary must be a listed member');
+  if(primary!==null&&!primaryEngine)throw Error('household primary requires the main engine');
   mkdirSync(dir,{recursive:true,mode:0o700});
   const database=new DatabaseSync(path.join(dir,'household-health.db'));
   database.exec(`PRAGMA journal_mode=WAL;
@@ -51,17 +62,44 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
       member_id TEXT NOT NULL, signal TEXT NOT NULL, last_date TEXT NOT NULL,
       PRIMARY KEY(member_id, signal)
     );`);
-  const engines=new Map();
+  // The fridge and the medicine cabinet belong to the household, not to one member's ledger.
+  const zone=config.timeZone??'Asia/Shanghai';
+  // A pantry item may point at a food-library entry; label foods share one foodId across the household.
+  const stock=createHomeStock({database,now,timeZone:zone,foodName:primaryEngine?.foodExists?id=>primaryEngine.foodExists(id):null});
+  const engines=new Map(primary?[[primary,primaryEngine]]:[]);
   const member=id=>{const m=byId.get(id);if(!m)throw Error('unknown memberId');return m;};
   const memberEngine=id=>{
     const m=member(id);
-    if(!engines.has(id))engines.set(id,engineFactory(path.join(dir,`nutrition-${id}.db`),{timeZone:m.timeZone,now}));
+    if(!engines.has(id)){
+      const e=engineFactory(path.join(dir,`nutrition-${id}.db`),{timeZone:m.timeZone,now});
+      // Package-label foods belong to the household: a member opened later still finds every one already recorded.
+      if(primaryEngine?.labelFoods&&e.importLabelFoods)e.importLabelFoods(primaryEngine.labelFoods());
+      engines.set(id,e);
+    }
     return engines.get(id);
   };
-  const memberTool=(memberId,tool,args={})=>{
-    if(typeof tool!=='string'||tool==='get_household_context')throw Error('invalid nutrition tool');
-    return memberEngine(memberId).execute(tool,args,`HOUSEHOLD:${memberId}`);
+  // After a label food is recorded for one member, the same rows (same foodId) go into everyone's library.
+  const shareLabelFoods=fromId=>{
+    const rows=memberEngine(fromId).labelFoods?.()??[];
+    let added=0;
+    for(const m of members)if(m.id!==fromId)added+=memberEngine(m.id).importLabelFoods?.(rows)??0;
+    return added;
   };
+  const memberTool=(memberId,tool,args={},source=`HOUSEHOLD:${memberId}`)=>{
+    if(typeof tool!=='string'||tool==='get_household_context')throw Error('invalid nutrition tool');
+    return memberEngine(memberId).execute(tool,args,source);
+  };
+  // The kitchen reads what everyone ate lately (to avoid repeats) and can put a confirmed dish into a member's plan.
+  const kitchen=createKitchen({database,stock,now,timeZone:zone,
+    recentMeals:days=>{
+      const end=dayInZone(now(),zone),out=[];
+      for(const m of members)for(let i=0;i<days;i++){const date=shiftDay(end,-i);
+        for(const x of memberTool(m.id,'get_meal_history',{date}).meals)out.push({name:x.name,date});}
+      return out;
+    },
+    planSet:(memberId,args)=>{member(memberId);return memberTool(memberId,'set_meal_plan',args);}});
+  // Symptom/dose timeline per member; one member's view never includes another's.
+  const timeline=({memberId,days=7}={})=>stock.timeline({memberIds:memberId?[member(memberId).id]:members.map(m=>m.id),days});
   const logObservation = ({memberId,kind,observedAt,note,sourceEventId,systolic,diastolic,value})=>{
     const m=member(memberId);
     if(!KINDS.has(kind))throw Error('unknown observation kind');
@@ -96,7 +134,7 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
   function context({days=14,memberId}={}){
     if(memberId)member(memberId);
     if(!Number.isInteger(days)||days<3||days>30)throw Error('days must be 3..30');
-    return {ok:true,scope:'household_nas',members:members.filter(m=>!memberId||m.id===memberId).map(m=>{
+    return {ok:true,scope:'household_nas',assistantName,members:members.filter(m=>!memberId||m.id===memberId).map(m=>{
       const snapshot=memberEngine(m.id).buildSnapshot();
       const rows=snapshot.history.filter(x=>x.date>=shiftDay(snapshot.date,-days+1)).toSorted((a,b)=>a.date.localeCompare(b.date));
       const today=snapshot.today;const obs=observations(m.id,days);
@@ -114,13 +152,22 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
         const previous=database.prepare('SELECT last_date FROM mentions WHERE member_id=? AND signal=?').get(m.id,s.key)?.last_date;
         return !previous||previous<shiftDay(snapshot.date,-2);
       });
-      return {memberId:m.id,name:m.name,mode:m.mode,asOf:snapshot.date,
+      // Family members (general mode) are record-only: the Dashboard shows what they ate over the
+      // last week so it can be looked back on, not just today. Days without meals are left out.
+      const recentMeals=m.mode==='general'?Array.from({length:7},(_,i)=>shiftDay(snapshot.date,-i))
+        .map(date=>({date,meals:memberTool(m.id,'get_meal_history',{date}).meals}))
+        .filter(d=>d.meals.length)
+        .map(d=>({date:d.date,slots:[...new Set(d.meals.map(x=>x.slot))].map(slot=>({slot,
+          items:d.meals.filter(x=>x.slot===slot).map(x=>({id:x.id,name:x.name,weightG:x.weight_g,revision:x.revision??0}))}))})):null;
+      const lastSleep=latestWith('sleep_hours');
+      return {memberId:m.id,name:m.name,mode:m.mode,asOf:snapshot.date,recentMeals,
         nutrition:m.mode==='performance'?{carbLevel:today.carb_level,training:!!today.is_training_day,
           remaining:{kcal:Math.round(snapshot.targets.kcal-today.intake_kcal),p:Math.round(snapshot.targets.p-today.p_g),c:Math.round(snapshot.targets.c-today.c_g),f:Math.round(snapshot.targets.f-today.f_g)},
           targets:snapshot.targets}:null,
         latest:{weightKg:latestWith('scale_weight_kg')?.scale_weight_kg??null,weightDate:latestWith('scale_weight_kg')?.date??null,
           weightTrendKg:snapshot.profile.ewma_weight_kg??null,
           sleepHours:recentSleep?.sleep_hours??null,sleepDate:recentSleep?.date??null,
+          lastSleep:lastSleep?{hours:lastSleep.sleep_hours,date:lastSleep.date}:null,
           deepSleepPct:latestWith('deep_sleep_pct')?.deep_sleep_pct??null,deepSleepDate:latestWith('deep_sleep_pct')?.date??null,restingHeartRate:recentRhr?.rhr_bpm??null,restingHeartRateDate:recentRhr?.date??null,
           hrvMs:latestWith('hrv_ms')?.hrv_ms??null,hrvMetric:latestWith('hrv_ms')?.hrv_metric??null,hrvDate:latestWith('hrv_ms')?.date??null,
           steps:latestWith('steps')?.steps??null,stepsDate:latestWith('steps')?.date??null,activeKcal:latestWith('active_kcal')?.active_kcal??null,activeKcalDate:latestWith('active_kcal')?.date??null,
@@ -142,6 +189,6 @@ export function createHousehold({configPath,dir,engineFactory,now=()=>new Date()
     database.prepare('INSERT INTO mentions VALUES(?,?,?) ON CONFLICT(member_id,signal) DO UPDATE SET last_date=excluded.last_date').run(memberId,signal,day);
     return {ok:true,memberId,signal,lastMentioned:day};
   };
-  return {members,member,memberTool,logObservation,observations,context,acknowledge,
-    close(){for(const e of engines.values())e.close();database.close();}};
+  return {members,primary,assistantName,member,memberTool,logObservation,observations,context,acknowledge,stock,kitchen,timeline,shareLabelFoods,
+    close(){for(const [id,e] of engines)if(id!==primary)e.close();database.close();}};
 }

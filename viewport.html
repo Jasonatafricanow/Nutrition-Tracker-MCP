@@ -4,28 +4,62 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>今日 · Nutrition Tracker MCP</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;1,9..144,400&family=Instrument+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500&family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet">
   <style>
+/* 面板底座 v1 · 方向 B「仪表台」（2026-11-22 选定）
+   源文件：C:\projects\xiyue-service-work\panel-base\panel-base.css —— 各面板各自拷一份，改这里再同步过去。
+   只管四样：颜色变量、字体与字号阶梯、圆角间距、回总入口的顶栏（.pb-hub）。各面板把自己的变量名映射到 --pb-*。
+   颜色只表示含义：accent=可点/进行中，warn=在等/要注意，ok=好转/完成，bad=出错/变差；
+   行情涨跌另用 mkt-up(红)/mkt-down(绿)，和好坏分开。 */
+:root{
+  --pb-bg:#F3F4F5;--pb-panel:#FFFFFF;--pb-field:#FFFFFF;--pb-hover:#EEF0F2;
+  --pb-ink:#16191D;--pb-muted:#5B636E;--pb-line:#DFE2E6;
+  --pb-accent:#1F6FEB;--pb-accent-ink:#FFFFFF;--pb-accent-soft:#E8F0FE;
+  --pb-warn:#B35900;--pb-ok:#1A7F37;--pb-bad:#C62828;
+  --pb-mkt-up:#D1242F;--pb-mkt-down:#1A7F37;
+  --pb-hub-bg:#16191D;--pb-hub-ink:#E9ECEF;--pb-hub-on:#2B3138;
+  --pb-font:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --pb-mono:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,"SF Mono",Menlo,monospace;
+  --pb-fs-xs:12px;--pb-fs-sm:13px;--pb-fs:14px;--pb-fs-md:16px;--pb-fs-lg:20px;--pb-fs-xl:28px;
+  --pb-r:6px;--pb-r-lg:8px;--pb-gap:16px;
+}
+@media (prefers-color-scheme:dark){:root{
+  --pb-bg:#111315;--pb-panel:#1A1D21;--pb-field:#14171A;--pb-hover:#23272C;
+  --pb-ink:#E6E9EC;--pb-muted:#9AA3AE;--pb-line:#2D3238;
+  --pb-accent:#4C8DFF;--pb-accent-ink:#0B1220;--pb-accent-soft:#1A2740;
+  --pb-warn:#E8A15A;--pb-ok:#5BC27A;--pb-bad:#F07070;
+  --pb-mkt-up:#F26B6B;--pb-mkt-down:#4CC07A;
+  --pb-hub-bg:#0B0D0F;--pb-hub-ink:#E6E9EC;--pb-hub-on:#23272C;
+}}
+.pb-hub{position:sticky;top:0;z-index:1000;display:flex;align-items:center;gap:2px;height:40px;padding:0 16px;
+  background:var(--pb-hub-bg);color:var(--pb-hub-ink);font:400 var(--pb-fs) var(--pb-font);overflow-x:auto;scrollbar-width:none}
+.pb-hub::-webkit-scrollbar{display:none}
+.pb-hub b{font-weight:600;margin-right:12px;white-space:nowrap}
+.pb-hub a{color:inherit!important;text-decoration:none!important;border:0!important;padding:5px 10px;border-radius:var(--pb-r);opacity:.7;white-space:nowrap}
+.pb-hub a:hover{opacity:1;background:var(--pb-hub-on)}
+.pb-hub a[aria-current]{opacity:1;background:var(--pb-hub-on);font-weight:600}
+.pb-hub a:focus-visible{outline:2px solid var(--pb-accent);outline-offset:1px}
+.pb-num{font-family:var(--pb-mono);font-variant-numeric:tabular-nums}
+@media (max-width:480px){.pb-hub{padding:0 4px}.pb-hub b{display:none}.pb-hub a{padding:5px 6px}}
+
     :root {
-      --paper: #F4F0E8; --paper-2: #ECE6DA; --ink: #1C1B19; --ink-2: #57524A; --rule: #CFC7B8;
-      --accent: #B53A27; --lv-high: #86570F; --lv-med: #625D54; --lv-low: #4C6644;
-      --serif: "Noto Serif SC", "Songti SC", serif;
-      --display: "Fraunces", "Noto Serif SC", serif;
-      --sans: "Instrument Sans", "Noto Sans SC", "PingFang SC", sans-serif;
+      /* 面板底座 v1（方向 B「仪表台」，2026-11-22），取自 panel-base.css */
+      --paper: #F3F4F5; --paper-2: #EEF0F2; --ink: #16191D; --ink-2: #5B636E; --rule: #DFE2E6;
+      --accent: #C62828; --lv-high: #B35900; --lv-med: #5B636E; --lv-low: #1A7F37;
+      --serif: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --display: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "SF Mono", Menlo, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       color-scheme: light;
     }
     @media (prefers-color-scheme: dark) {
       :root:not([data-theme="light"]) {
-        --paper: #1A1916; --paper-2: #23211D; --ink: #ECE6DA; --ink-2: #B3AC9F; --rule: #3A3731;
-        --accent: #E0674F; --lv-high: #D4A04E; --lv-med: #A39C90; --lv-low: #8FB083;
+        --paper: #111315; --paper-2: #23272C; --ink: #E6E9EC; --ink-2: #9AA3AE; --rule: #2D3238;
+        --accent: #F07070; --lv-high: #E8A15A; --lv-med: #9AA3AE; --lv-low: #5BC27A;
         color-scheme: dark;
       }
     }
     :root[data-theme="dark"] {
-      --paper: #1A1916; --paper-2: #23211D; --ink: #ECE6DA; --ink-2: #B3AC9F; --rule: #3A3731;
-      --accent: #E0674F; --lv-high: #D4A04E; --lv-med: #A39C90; --lv-low: #8FB083;
+      --paper: #111315; --paper-2: #23272C; --ink: #E6E9EC; --ink-2: #9AA3AE; --rule: #2D3238;
+      --accent: #F07070; --lv-high: #E8A15A; --lv-med: #9AA3AE; --lv-low: #5BC27A;
       color-scheme: dark;
     }
 
@@ -54,7 +88,7 @@
     .masthead { padding: 32px 0 16px; border-bottom: 2px solid var(--ink); }
     .masthead-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
     .dateline { font: 600 34px/1.1 var(--serif); letter-spacing: 0.01em; }
-    .dateline em { font: italic 400 22px var(--display); color: var(--ink-2); margin-left: 12px; letter-spacing: 0; }
+    .dateline em { font: 400 20px var(--display); color: var(--ink-2); margin-left: 12px; letter-spacing: 0; }
     .level-word { font: 700 34px/1.1 var(--serif); }
     .level-word small { font: 500 14px var(--sans); color: var(--ink-2); margin-left: 8px; }
     .meta { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--ink-2); }
@@ -70,7 +104,7 @@
     section { padding: 40px 0 8px; }
     .sec-head { border-top: 1px solid var(--ink); padding-top: 12px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
     .sec-head h2 { margin: 0; font: 600 22px/1.3 var(--serif); }
-    .sec-head h2 i { font: italic 400 22px var(--display); color: var(--ink-2); margin-right: 10px; }
+    .sec-head h2 i { font: 400 16px var(--display); color: var(--ink-2); margin-right: 10px; }
     .sec-head .aside { font-size: 12px; color: var(--ink-2); }
 
     /* 主数字 */
@@ -210,6 +244,26 @@
     .household-card .mini { display:flex; flex-wrap:wrap; gap:7px 12px; font-size:12px; line-height:1.7; }
     .household-card .mini span { color:var(--muted); }
     .household-card p { font-size:12px; margin:10px 0 0; }
+    .stock-cards { margin-top:12px; }
+    .stock-list { font-size:12px; line-height:1.7; }
+    .stock-list > div:not(.sub), .stock-list .sub > div { display:flex; justify-content:space-between; gap:10px; }
+    .stock-list > div:not(.sub) > span:last-child, .stock-list .sub > div > span:last-child { white-space:nowrap; }
+    .stock-list .exp { color:var(--accent); } .stock-list .soon { color:var(--lv-high); }
+    .stock-list .sub { margin-top:8px; padding-top:6px; border-top:1px solid var(--rule); }
+    .stock-list .tiny { font-size:11px; }
+    .stock-list .linkbtn { padding:2px 0; min-height:24px; font-size:12px; margin-left:6px; }
+    .stock-list > div.pantry-row { display:block; padding:2px 0 4px; border-bottom:1px dotted var(--rule); }
+    .stock-list .pantry-row > div { display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
+    .stock-list .pantry-row > div:first-child > span:last-child { white-space:nowrap; }
+    @media (min-width:700px) { .household-card.wide { grid-column:span 2; } }
+    .pantry-add { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .pantry-add input { flex:1 1 90px; min-width:0; font:inherit; padding:6px 8px; border:1px solid var(--rule); border-radius:4px; background:var(--paper); color:var(--ink); }
+    .pantry-add .btn { padding:6px 12px; min-height:32px; font-size:12px; }
+    .stock-list details summary { cursor:pointer; }
+    .stock-list details.recipe { border-bottom:1px solid var(--rule); padding:4px 0; }
+    .stock-list details.recipe summary { display:flex; justify-content:space-between; gap:10px; list-style:none; }
+    .stock-list details.recipe ol { margin:4px 0; padding-left:18px; }
+    .stock-list .sub details > div { display:flex; justify-content:space-between; gap:10px; }
     /* 首屏错落渐入 */
     .reveal { animation: rise .6s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--i, 0) * 60ms); }
     @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
@@ -217,6 +271,7 @@
   </style>
 </head>
 <body>
+  <nav class="pb-hub" aria-label="家里的面板"><b>家里的面板</b><a href="/app/piweb/chat" data-k="chat">助手</a><a href="/app/piweb/manage" data-k="manage">管理</a><a href="/app/workbench/" data-k="workbench">工作台</a><a href="/app/nutrition/" data-k="nutrition" aria-current="page">家庭健康</a><a href="/app/stock/" data-k="stock">涨停</a><a href="/app/proxypanel/" data-k="proxy">旁路代理</a></nav>
   <div class="wrap">
     <header class="masthead reveal" style="--i:0">
       <div class="masthead-row">
@@ -237,8 +292,9 @@
 
     <!-- 家庭概览：只读，不替代各人的 Agent 交互 -->
     <section id="household-panel" class="reveal hidden" style="margin:20px 0 28px">
-      <div class="sec-head"><h2>家庭今日概览</h2><span class="aside">数据来自家庭 NAS · 仅供观察</span></div>
+      <div class="sec-head"><h2>家庭概览</h2><span class="aside">数据来自家庭 NAS · 冰箱和菜谱可在这里改</span></div>
       <div id="household-cards" class="household-cards"></div>
+      <div id="stock-cards" class="household-cards stock-cards"></div>
     </section>
 
     <!-- 今日 -->
@@ -438,7 +494,7 @@
     const fmt = (v) => Number(v).toLocaleString("en-US");
     const kg = (v, d = 2) => (v == null ? "—" : Number(v).toFixed(d));
     const dash = (v) => (v == null ? "—" : v);
-    const kcalOf = (m) => Math.round(m.p * 4 + m.c * 4 + m.f * 9);
+    const kcalOf = (m) => Math.round(m.kcal ?? (m.p * 4 + m.c * 4 + m.f * 9)); // label energy when the row has it
     const time = (iso) => new Date(iso).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
 
     function toast(msg) {
@@ -458,11 +514,12 @@
       }
       return csrfToken;
     }
-    async function dispatch(tool, args = {}, memberId) {
+    async function dispatch(tool, args = {}, memberId, op) {
       if (!connected) return toast("未连接服务端，操作未执行");
       try {
         const csrf = await sessionToken();
-        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json", "X-Nutrition-CSRF":csrf }, body: JSON.stringify({ tool, args, ...(memberId?{memberId}:{}) }) });
+        const payload = op ? { op, args } : { tool, args, ...(memberId?{memberId}:{}) };
+        const r = await fetch("/api/mcp-dispatch", { method: "POST", headers: { "Content-Type": "application/json", "X-Nutrition-CSRF":csrf }, body: JSON.stringify(payload) });
         const body = await r.json();
         if (!r.ok) toast(body.error || `请求失败 ${r.status}`);
         return body;
@@ -771,7 +828,192 @@
       if(!Number.isFinite(weightGrams)||weightGrams<=0||weightGrams>5000)return toast('请输入有效克重');
       const requestId='family-ui-edit-'+Date.now()+'-'+Math.random().toString(36).slice(2);
       const result=await dispatch('update_meal_item',{mealId,expectedRevision,requestId,weightGrams,portionSource:'user_estimate'},memberId);
-      if(result?.ok){await loadHouseholdMeals(memberId);toast('已更正，保留历史');}
+      if(result?.ok){await loadHouseholdMeals(memberId);await refreshHousehold();toast('已更正，保留历史');}
+    }
+    // Family members are record-only: show the last 7 days so they can be looked back on.
+    const md=d=>d?d.slice(5):'';
+    function familyCard(m){
+      const x=m.latest, fields=[];
+      fields.push(['睡眠',x.lastSleep?`${x.lastSleep.hours}h（${md(x.lastSleep.date)}）`:'暂无记录']);
+      if(x.bloodPressure)fields.push(['血压',`${x.bloodPressure.systolic}/${x.bloodPressure.diastolic}（${md(x.bloodPressure.date)}）`]);
+      if(x.temperatureC)fields.push(['体温',`${x.temperatureC.value}°C（${md(x.temperatureC.date)}）`]);
+      if(x.weightKg!=null)fields.push(['体重',`${x.weightKg} kg（${md(x.weightDate)}）`]);
+      const days=m.recentMeals||[];
+      const log=days.length?days.map(d=>`<div style="margin:6px 0"><b>${esc(md(d.date))}</b> `+
+        d.slots.map(s=>`${esc(s.slot)}：`+s.items.map(i=>`${esc(i.name)} <button type="button" class="linkbtn" title="点击更正克重" onclick="editHouseholdMeal('${esc(m.memberId)}','${esc(i.id)}',${i.revision},${i.weightG})">${i.weightG}g</button>`).join('、')).join('；')+
+        `</div>`).join(''):'近 7 天暂无餐食记录';
+      return `<article class="household-card"><h3>${esc(m.name)} <small>日常观察</small></h3>
+        <div class="mini">${fields.map(([a,b])=>`<div><span>${esc(a)}</span> ${esc(b)}</div>`).join('')}</div>
+        <div class="small" style="margin-top:10px"><span class="muted">近 7 天吃了什么</span>${log}</div></article>`;
+    }
+    // Fridge (editable here), menus, cookbook, timeline, medicine cabinet and workouts.
+    const clock=iso=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso)).replace('/','-');
+    const card=(title,body)=>`<article class="household-card"><h3>${title}</h3><div class="stock-list">${body}</div></article>`;
+    const none='<span class="muted">还没有记录</span>';
+    function medsCard(m,names){
+      const who=ids=>ids?.length?ids.map(id=>names[id]||id).join('、'):'全家';
+      const cab=(m?.cabinet||[]).map(x=>`<div><span>${esc(x.name)} <span class="muted">${esc(who(x.forMembers))}</span></span><span>${esc([x.dose,x.minIntervalHours?`隔 ${x.minIntervalHours} 小时`:''].filter(Boolean).join(' · '))}</span></div>`);
+      const rec=(m?.recent||[]).map(r=>{
+        const capped=r.canTakeNow===false&&(r.note||'').includes('上限');
+        const st=capped?'<span class="exp">24 小时已到上限</span>':r.canTakeNow?'现在能吃':r.canTakeNow===false?
+          `<span class="soon">还要等 ${Math.floor(r.waitMinutes/60)} 小时 ${r.waitMinutes%60} 分</span>`:'<span class="muted">没登记间隔</span>';
+        return `<div><span>${esc(names[r.memberId]||r.memberId)} · ${esc(r.medication)} <span class="muted">${clock(r.lastTakenAt)}</span></span><span>${st}</span></div>`;
+      });
+      if(!cab.length&&!rec.length)return card('药箱',none);
+      return card('药箱',(cab.join('')||none)+(rec.length?`<div class="sub">${rec.join('')}</div>`:''));
+    }
+    function workoutsCard(w,names){
+      const ms=w?.members||[];
+      const sum=ms.map(m=>`<div><span>${esc(names[m.memberId]||m.memberId)}</span><span>这周 ${m.sessionsThisWeek} 次 · ${m.minutesThisWeek} 分钟</span></div>`);
+      const recent=ms.flatMap(m=>m.recent.map(r=>({...r,memberId:m.memberId}))).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5)
+        .map(r=>`<div class="muted"><span>${esc(md(r.date))} ${esc(names[r.memberId]||r.memberId)} ${esc(r.activity)}</span><span>${r.durationMin?r.durationMin+' 分钟':''}</span></div>`);
+      return card('运动',sum.length?sum.join('')+`<div class="sub">${recent.join('')}</div>`:none);
+    }
+    // ---------- 厨房：冰箱（可改）、菜单、菜谱、症状和服药时间线 ----------
+    // Writes go through the same everyday operations an agent uses, as client 「页面」 (kitchen scope only).
+    let stockBusy=false; // a form or prompt is open: the 30-second refresh must not wipe it
+    // What this family calls its assistant: household.json "assistantName" (default 助手), never written into the page.
+    let assistantName='助手';
+    function setAssistantName(name){
+      if(typeof name!=='string'||!name.trim())return;
+      assistantName=name.trim();
+      const link=document.querySelector('.pb-hub a[data-k="chat"]');
+      if(link)link.textContent=assistantName;
+    }
+    const rid=p=>p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
+    async function kitchenOp(op,args){
+      const body=await dispatch(null,{...args,requestId:args.requestId??rid('page-'+op)},undefined,op);
+      if(body?.ok)await refreshStock(lastMembers);
+      return body;
+    }
+    function pantryCard(p){
+      const rows=(p?.items||[]).map(i=>{
+        const cls=i.daysLeft<0?'exp':i.daysLeft<=2?'soon':'';
+        const left=i.daysLeft<0?`过期 ${-i.daysLeft} 天`:i.daysLeft===0?'今天到期':`还剩 ${i.daysLeft} 天`;
+        const q=i.quantity||'';
+        const qty=q?` <span class="${/待确认/.test(q)?'soon':'muted'}">${esc(q)}</span>`:'';
+        const who=i.lastChange?.by?`<span class="muted tiny" title="${clock(i.lastChange.at)}">${esc(i.lastChange.by)} 改的</span>`:'<span></span>';
+        return `<div class="pantry-row"><div class="${cls}"><span>${esc(i.name)}${qty}</span><span>${left}</span></div><div>${who}<span>
+          <button type="button" class="linkbtn" onclick="pantryEditQty('${esc(i.id)}')" aria-label="改 ${esc(i.name)} 的数量">改</button>
+          <button type="button" class="linkbtn" onclick="pantryDone('${esc(i.id)}','${esc(i.name)}','use')" aria-label="${esc(i.name)} 用完了">用完</button>
+          <button type="button" class="linkbtn" onclick="pantryDone('${esc(i.id)}','${esc(i.name)}','discard')" aria-label="扔掉 ${esc(i.name)}">扔掉</button></span></div></div>`;
+      });
+      const form=`<form class="pantry-add" onsubmit="pantryAddForm(event)">
+        <input name="name" placeholder="买了什么" required maxlength="60" aria-label="名称">
+        <input name="quantity" placeholder="多少，如 500g" maxlength="60" aria-label="数量">
+        <input name="days" type="number" min="0" max="3650" placeholder="能放几天" aria-label="能放几天（不填按常见）">
+        <button class="btn ghost" type="submit">放进冰箱</button></form>`;
+      return card('冰箱',(rows.join('')||none)+`<div class="sub">${form}</div>`).replace('class="household-card"','class="household-card wide"');
+    }
+    const pantryById=id=>(lastPantry?.items||[]).find(i=>i.id===id);
+    async function pantryEditQty(id){
+      const it=pantryById(id); if(!it)return;
+      stockBusy=true;
+      const raw=prompt(`「${it.name}」现在还剩多少？（照你会说的写，如 200g、半盒）`,(it.quantity||'').replace(/（[^（]*待确认）$/,''));
+      stockBusy=false;
+      if(raw===null)return;
+      const r=await kitchenOp('pantry',{action:'edit',itemId:id,quantity:raw.trim()});
+      if(r?.ok)toast(`已改：${it.name} ${raw.trim()}`);
+    }
+    async function pantryDone(id,name,how){
+      const r=await kitchenOp('pantry',how==='use'?{action:'use',itemId:id,remaining:''}:{action:'discard',itemId:id});
+      if(r?.ok)toast(how==='use'?`${name} 用完了`:`${name} 扔掉了`);
+    }
+    async function pantryAddForm(ev){
+      ev.preventDefault();
+      const f=ev.target, name=f.name.value.trim(); if(!name)return;
+      const item={name,quantity:f.quantity.value.trim(),...(f.days.value!==''?{shelfLifeDays:Number(f.days.value)}:{})};
+      const r=await kitchenOp('pantry',{action:'add',items:[item]});
+      if(r?.ok){f.reset();toast(`已放进冰箱：${name}`);await refreshStock();}
+    }
+
+    // Menus: what to buy, the stove order, cook it, keep a dish.
+    const dishLine=(m,d)=>{
+      const kept=d.kitchenRecipeId?'<span class="muted">已存菜谱</span>':
+        `<button type="button" class="linkbtn" onclick="keepDish('${esc(m.menuId)}','${esc(d.id)}','${esc(d.name)}')">存为菜谱</button>`;
+      const off=d.cooked===false?' <span class="muted">（没做）</span>':'';
+      return `<div><span>${esc(d.name)} <span class="muted">${esc(d.kind)}</span>${off}</span><span>${kept}</span></div>`;
+    };
+    function menuBlock(m){
+      const head=`${esc(md(m.date))} ${esc(m.mealSlot||'')} ${m.status==='draft'?'草案':m.status==='confirmed'?'定了':'做了'}`;
+      const buy=m.shopping?.buy?.map(l=>l.name)||[], check=(m.shopping?.checkAtHome||[]).filter(l=>!l.staple).map(l=>l.name);
+      const shop=m.status==='cooked'?'':`<div class="muted">要买：${esc(buy.join('、')||'无')}${check.length?`；先查家里：${esc(check.join('、'))}`:''}</div>`;
+      const steps=m.status==='cooked'?'':`<details><summary class="muted">开火顺序</summary>${(m.timeline?.steps||[]).map(s=>`<div><span>${esc(s.at)}</span><span>${esc(s.what)}</span></div>`).join('')}</details>`;
+      const cook=m.status==='cooked'?'':`<button type="button" class="linkbtn" onclick="cookedMenu('${esc(m.menuId)}')">做好了（按用量扣冰箱）</button>`;
+      return `<div class="sub"><b>${head}</b> ${cook}${m.dishes.map(d=>dishLine(m,d)).join('')}${shop}${steps}</div>`;
+    }
+    function menusCard(menus){
+      return card('菜单',menus.length?menus.map(menuBlock).join(''):'<span class="muted">还没有菜单；跟'+esc(assistantName)+'说「今晚吃什么」</span>');
+    }
+    async function cookedMenu(menuId){
+      stockBusy=true; const ok=confirm('这桌菜都做了？冰箱会按菜里写的用量扣掉。只做了其中几道就跟'+assistantName+'说是哪几道。'); stockBusy=false;
+      if(!ok)return;
+      const r=await kitchenOp('menu',{action:'cooked',menuId});
+      if(r?.ok){
+        const chk=(r.pantry?.toCheck||[]).map(x=>x.name);
+        toast('已记做好'+(chk.length?`；${chk.join('、')} 用量算不出来，已标「剩多少待确认」`:''));
+      }
+    }
+    async function keepDish(menuId,dishId,name){
+      const r=await kitchenOp('kitchen_recipe',{action:'save',menuId,dishId});
+      if(r?.ok)toast(`「${name}」存进菜谱了`);
+    }
+
+    // The cookbook: dishes the family kept.
+    function cookbookCard(b){
+      const rows=(b?.recipes||[]).map(r=>`<details class="recipe"><summary><span>${esc(r.name)} <span class="muted">${esc(r.kind)}</span></span>
+          <span class="muted">${r.timesCooked?`做过 ${r.timesCooked} 次${r.lastCooked?' · 上次 '+esc(md(r.lastCooked)):''}`:'还没做过'}</span></summary>
+        <div class="muted">${r.ingredients.map(i=>esc(i.name+(i.amount?' '+i.amount:''))).join('、')}</div>
+        ${['heat','seasoning','doneness'].filter(k=>r[k]).map(k=>`<div class="muted">${({heat:'火候',seasoning:'调味',doneness:'熟度'})[k]}：${esc(r[k])}</div>`).join('')}
+        ${(r.steps||[]).length?`<ol>${r.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>`:''}
+        <button type="button" class="linkbtn" onclick="dropRecipe('${esc(r.recipeId)}','${esc(r.name)}')">从菜谱删掉</button></details>`);
+      return card('菜谱',rows.join('')||'<span class="muted">还没有；菜单里认可的菜点「存为菜谱」，或跟'+esc(assistantName)+'说「这个存下来」</span>');
+    }
+    async function dropRecipe(id,name){
+      stockBusy=true; const ok=confirm(`把「${name}」从菜谱删掉？`); stockBusy=false;
+      if(!ok)return;
+      const r=await kitchenOp('kitchen_recipe',{action:'remove',recipeId:id});
+      if(r?.ok)toast(`已删掉「${name}」`);
+    }
+
+    // Symptoms and doses per member, side by side; links only where the user said so.
+    function timelineCard(t,names){
+      const ST={active:'开始',improving:'好些了',resolved:'好了'};
+      const ms=(t?.members||[]).filter(m=>m.events.length);
+      const body=ms.map(m=>`<div class="sub"><b>${esc(names[m.memberId]||m.memberId)}</b>${m.events.slice(-12).map(e=>e.type==='symptom'
+        ?`<div><span>${esc(e.symptom)} <span class="soon">${ST[e.status]||esc(e.status)}</span></span><span class="muted">${clock(e.at)}</span></div>`
+        :`<div><span>吃了 ${esc(e.medication)} <span class="muted">${esc(e.amount)}</span>${e.inCabinet?'':' <span class="soon tiny">药箱没对上</span>'}${e.forSymptom?.length?` <span class="muted">为了${esc(e.forSymptom.map(x=>x.symptom).join('、'))}</span>`:''}</span><span class="muted">${clock(e.at)}<button type="button" class="linkbtn" onclick="doseFix('${esc(e.doseId)}','${esc(e.medication)}','${esc(e.amount)}')" aria-label="改这次 ${esc(e.medication)} 的剂量">改</button><button type="button" class="linkbtn" onclick="doseRemove('${esc(e.doseId)}','${esc(e.medication)}')" aria-label="删掉这次 ${esc(e.medication)}">删</button></span></div>`).join('')}</div>`).join('');
+      return card('身体 · 近 7 天',body||'<span class="muted">这 7 天没人说哪儿不舒服</span>');
+    }
+    // Hand corrections of a recorded dose; the old values stay in the plugin's edit history.
+    async function doseFix(id,name,amount){
+      stockBusy=true; const raw=prompt(`这次「${name}」实际吃了多少？（照你会说的写，如 2颗、5ml）`,amount==='没说'?'':amount); stockBusy=false;
+      if(raw==null||!raw.trim())return;
+      const r=await kitchenOp('med',{action:'fix',doseId:id,amount:raw.trim(),userWords:`页面上改成 ${raw.trim()}`});
+      if(r?.ok)toast(`已改成 ${raw.trim()}`);
+    }
+    async function doseRemove(id,name){
+      stockBusy=true; const ok=confirm(`删掉这次「${name}」？（没吃或记重了；记录留痕，不再算进间隔）`); stockBusy=false;
+      if(!ok)return;
+      const r=await kitchenOp('med',{action:'remove',doseId:id,userWords:'页面上删掉：没吃或记重了'});
+      if(r?.ok)toast(`已删掉这次「${name}」`);
+    }
+
+    let lastMembers=[], lastPantry=null;
+    async function refreshStock(members){
+      if(members)lastMembers=members;
+      const get=v=>fetch('/api/household?view='+v).then(r=>r.ok?r.json():null).catch(()=>null);
+      const [p,m,w,k,b,t]=await Promise.all([get('pantry'),get('meds'),get('workouts'),get('kitchen'),get('cookbook'),get('timeline')]);
+      const ids=[...(k?.openMenus||[]).map(x=>x.menuId),...(k?.recentlyCooked||[]).slice(0,2).map(x=>x.menuId)];
+      const menus=(await Promise.all(ids.map(id=>get('menu&menuId='+encodeURIComponent(id))))).filter(Boolean);
+      // Someone is answering a prompt or typing in a form: leave it alone until the next refresh.
+      const box=$('stock-cards');
+      if(stockBusy||[...box.querySelectorAll('input')].some(i=>i.value)||box.contains(document.activeElement)&&document.activeElement.tagName==='INPUT')return;
+      lastPantry=p;
+      const names=Object.fromEntries((lastMembers||[]).map(x=>[x.memberId,x.name]));
+      const open=new Set([...box.querySelectorAll('details[open]>summary')].map(s=>s.textContent));
+      box.innerHTML=pantryCard(p)+menusCard(menus)+cookbookCard(b)+timelineCard(t,names)+medsCard(m,names)+workoutsCard(w,names);
+      for(const s of box.querySelectorAll('details>summary'))if(open.has(s.textContent))s.parentElement.open=true;
     }
     async function refreshHousehold() {
       try {
@@ -779,8 +1021,10 @@
         if (res.status===404) return; // Single-person mode stays unchanged
         if (!res.ok) return;
         const data=await res.json();
+        setAssistantName(data.assistantName);
         $('household-panel').classList.remove('hidden');
         $('household-cards').innerHTML=data.members.map(m=>{
+          if(m.mode==='general')return familyCard(m);
           const x=m.latest, n=m.nutrition;
           const fields=[['睡眠',x.sleepHours==null?'—':x.sleepHours+'h'],
             ['静息心率',x.restingHeartRate==null?'—':x.restingHeartRate+' bpm'],
@@ -797,6 +1041,7 @@
               <div id="household-meals-${esc(m.memberId)}" class="small muted">点击加载</div>
             </details></article>`;
         }).join('');
+        await refreshStock(data.members);
       } catch {} // A secondary panel should never break personal nutrition UI
     }
     refreshHousehold();

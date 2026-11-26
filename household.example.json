@@ -1,5 +1,6 @@
 {
   "timeZone": "Asia/Shanghai",
+  "assistantName": "助手",
   "members": [
     {"id":"adult_a","name":"成员 A","mode":"performance"},
     {"id":"adult_b","name":"成员 B","mode":"general"}

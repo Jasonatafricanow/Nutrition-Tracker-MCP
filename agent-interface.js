@@ -9,22 +9,23 @@ const READ_GROUPS = {
   photo: ['get_photo_estimation_protocol','get_photo_meal_draft'],
   planning: ['get_snapshot','get_agent_context','set_day_context','update_weekly_schedule','calibrate_metabolic_tdee'],
   history: ['get_meal_history','get_meal_corrections','export_nutrition_data','report'],
-  extras: ['save_meal_template','log_meal_template','update_supplement_stack','add_food_to_library','family_recipes','barcode']
+  extras: ['recipes','meal_plan','shopping_list','save_meal_template','log_meal_template','update_supplement_stack','add_food_to_library','family_recipes','barcode']
 };
 const OPERATIONS = Object.freeze({
   meal:'log_meal_items', quick_meal:'log_estimated_meal', checkin:'log_morning_checkin', correction:'update_meal_item', recent_correction:'correct_recent_meal',
   photo_stage:'stage_photo_estimate', photo_confirm:'confirm_photo_meal', photo_discard:'discard_photo_meal',
   template_save:'save_meal_template', template_log:'log_meal_template',
   supplement:'update_supplement_stack', plan:'set_day_context', profile:'set_profile',
-  intake_complete:'mark_intake_complete', food_add:'add_food_to_library'
+  intake_complete:'mark_intake_complete', food_add:'add_food_to_library',
+  recipe_save:'save_recipe', plan_set:'set_meal_plan', plan_remove:'remove_plan_entry', plan_log:'log_plan_entry', food_add_checked:'add_checked_food', food_add_label:'add_label_food'
 });
-const RESTRICTED = new Set(['get_snapshot','get_agent_context','get_meal_history','get_meal_corrections','get_photo_meal_draft','get_photo_estimation_protocol','search_foods','list_meal_templates','export_nutrition_data']);
+const RESTRICTED = new Set(['get_snapshot','get_agent_context','get_meal_history','get_meal_corrections','get_photo_meal_draft','get_photo_estimation_protocol','search_foods','list_meal_templates','export_nutrition_data','list_recipes','get_meal_plan','get_shopping_list']);
 const clean = v=>Object.fromEntries(Object.entries(v).filter(([,x])=>x!==null&&x!==undefined));
 
 export function createAgentInterface({engine,household=null,usda=null,openFoodFacts=null}={}){
  if(!engine)throw Error('engine required');
  const forMember=(id)=>{
-   if(household){if(!id)throw Error('memberId required for personal operations in household mode');
+   if(household){id??=household.primary;if(!id)throw Error('memberId required for personal operations in household mode');
      household.member(id);return (name,args)=>household.memberTool(id,name,args);
    }
    if(id)throw Error('memberId requires household mode');
@@ -48,7 +49,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      if(focus==='all')base.dataQuality=m.dataQuality;
      return base;
    })});
- async function query({view='household',memberId,focus='daily',date,days=14,queries=[],query:term='',barcode,limit=5,draftId,domain='daily',source='local'}={}){
+ async function query({view='household',memberId,focus='daily',date,days=14,queries=[],query:term='',barcode,limit=5,draftId,domain='daily',source='local',recipeId,fromDate,toDate,includeLogged=false,includeGone=false}={}){
    if(view==='capabilities'){
      if(!(domain in READ_GROUPS))throw Error('unknown capabilities domain');
      return {ok:true,domain,available:READ_GROUPS[domain],writeOperations:Object.keys(OPERATIONS),
@@ -64,6 +65,34 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      }
      if(view==='member'&&!memberId)throw Error('memberId required for member view');
      return projectHousehold(household.context({days,...(memberId?{memberId}:{})}),focus);
+   }
+   if(view==='pantry'){
+     if(!household)throw Error('pantry requires household mode');
+     return household.stock.pantry({includeGone:!!includeGone});
+   }
+   if(view==='workouts'){
+     if(!household)throw Error('workouts requires household mode');
+     return household.stock.workouts({memberId,days});
+   }
+   if(view==='meds'){
+     if(!household)throw Error('meds requires household mode');
+     return household.stock.meds({memberId});
+   }
+   if(view==='timeline'){
+     if(!household)throw Error('timeline requires household mode');
+     return household.timeline({memberId,days});
+   }
+   if(view==='kitchen'){
+     if(!household)throw Error('kitchen requires household mode');
+     return household.kitchen.kitchen();
+   }
+   if(view==='menu'){
+     if(!household)throw Error('menu requires household mode');
+     return household.kitchen.menu({menuId:recipeId});
+   }
+   if(view==='cookbook'){
+     if(!household)throw Error('cookbook requires household mode');
+     return household.kitchen.cookbook({recipeId,query:term});
    }
    if(view==='health_history'){
      if(!household)throw Error('health_history requires household mode');
@@ -102,7 +131,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      }
      const call=forMember(memberId);return {ok:true,source:'local',results:inputs.map(q=>{
        const v=call('search_foods',{query:q,limit:Math.min(limit,5)});
-       return {query:q,foods:v.foods.map(({id,name,p,c,f})=>({id,name,p,c,f}))};
+       return {query:q,foods:v.foods};
      })};
    }
    const call=forMember(memberId);
@@ -114,6 +143,13 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      const r=call('list_meal_templates',{query:term,limit:Math.min(limit,10)});
      return r;
    }
+   if(view==='recipes'){
+     return call('list_recipes',recipeId?{recipeId}:{query:term,limit:Math.min(limit,10)});
+   }
+   if(view==='meal_plan'||view==='shopping_list'){
+     const range=clean({fromDate:fromDate??date,toDate});
+     return view==='meal_plan'?call('get_meal_plan',range):call('get_shopping_list',{...range,includeLogged:!!includeLogged});
+   }
    if(view==='photo_draft'){
      if(!draftId)throw Error('draftId required');return call('get_photo_meal_draft',{draftId});
    }
@@ -124,10 +160,11 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
    throw Error('unknown query view');
  }
  function execute({memberId,operation,args={},tool,includeContext=true}={}){
+   memberId??=household?.primary??undefined; // personal writes without memberId belong to the primary member
    const afterWrite=(out)=>{
-     if(!includeContext||!['meal','quick_meal','checkin','health_observation','correction','recent_correction'].includes(operation))return out;
+     if(!includeContext||!['meal','quick_meal','checkin','health_observation','correction','recent_correction','plan_log'].includes(operation))return out;
      if(household){const r=household.context({days:3,memberId});
-       const c=projectHousehold(r,['meal','quick_meal','correction','recent_correction'].includes(operation)?'food':'health');
+       const c=projectHousehold(r,['meal','quick_meal','correction','recent_correction','plan_log'].includes(operation)?'food':'health');
        return {...out,context:c.members[0]};
      }
      const x=engine.execute('get_agent_context',{},'MCP_COMPACT');
@@ -140,6 +177,20 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
      if(!memberId)throw Error('memberId required');
      return afterWrite(household.logObservation({memberId,...args}));
    }
+   // Household stock (fridge, medicine cabinet): shared, not a member's ledger.
+   const STOCK={pantry_add:'pantryAdd',pantry_use:'pantryUse',pantry_discard:'pantryDiscard',pantry_edit:'pantryEdit',med_save:'medSave',
+     dose_link:'linkDose',dose_unlink:'unlinkDose',dose_fix:'fixDose'};
+   if(Object.hasOwn(STOCK,operation)){
+     if(!household)throw Error(operation+' requires household mode');
+     return household.stock[STOCK[operation]](operation==='dose_link'?{memberId,...args}:args);
+   }
+   // The kitchen (menus and stated preferences): shared by the household; never writes the pantry or a ledger.
+   const KITCHEN={menu_draft:'draft',menu_swap:'swap',menu_confirm:'confirm',menu_cooked:'cooked',menu_discard:'discard',
+     kitchen_pref_add:'prefAdd',kitchen_pref_remove:'prefRemove',kitchen_recipe_save:'recipeSave',kitchen_recipe_remove:'recipeRemove'};
+   if(Object.hasOwn(KITCHEN,operation)){
+     if(!household)throw Error(operation+' requires household mode');
+     return household.kitchen[KITCHEN[operation]](args);
+   }
    if(operation==='acknowledge'){
      if(!household)throw Error('acknowledge requires household mode');
      if(!memberId)throw Error('memberId required');
@@ -149,6 +200,7 @@ export function createAgentInterface({engine,household=null,usda=null,openFoodFa
    if(!name||!TOOL_DEFS[name]||RESTRICTED.has(name))throw Error('unsupported write operation');
    // Delegate schema validation, business rules, idempotency and transaction boundaries.
    const result=forMember(memberId)(name,args);
+   if(name==='add_label_food'&&household&&result.ok)household.shareLabelFoods(memberId);
    return afterWrite(result);
  }
  return {query,execute,projectHousehold};
