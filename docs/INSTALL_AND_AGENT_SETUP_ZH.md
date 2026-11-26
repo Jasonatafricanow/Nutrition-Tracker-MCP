@@ -1,8 +1,8 @@
 # Nutrition Tracker MCP — 安装、部署与 Agent 连接指南
 
-> **当前标准：v5.5 everyday**。默认提供四个 MCP 工具
-> `nutrition_query`（`summary/meals/foods`）、`nutrition_execute`
-> （`meal/correct/health/photo_stage/photo_confirm`）、`inventory_query` 和 `inventory_update`。
+> **当前标准：v5.5 everyday**。默认只暴露两个 MCP 工具
+> `nutrition_query`（`summary/meals/foods`）和 `nutrition_execute`
+> （`meal/correct/health/photo_stage/photo_confirm`）。
 > 具体参数与业务约束只参考 [Agent 调用契约](AGENT_CONTRACT_ZH.md)。
 > `MCP_TOOL_SURFACE=compact` 是 v5.4 两工具旧参数的迁移接口，
 > `MCP_TOOL_SURFACE=full` 是早期低层工具兼容/专业维护模式。
@@ -121,7 +121,7 @@ macOS：`~/Library/Application Support/Claude/claude_desktop_config.json`。
 }
 ```
 
-保存、重启或刷新 Cursor MCP 配置，在工具列表确认 `nutrition_query`、`nutrition_execute`、`inventory_query` 和 `inventory_update`。Cursor CLI 可使用 `agent mcp list` 查看状态（具体命令依宿主版本而异）。
+保存、重启或刷新 Cursor MCP 配置，在 MCP 工具列表确认 **仅有 `nutrition_query` 和 `nutrition_execute`**。Cursor CLI 可使用 `agent mcp list` 查看状态（具体命令依宿主版本而异）。
 
 ### Claude Code CLI
 
@@ -168,7 +168,7 @@ env = { NUTRITION_TIME_ZONE = "Asia/Shanghai" }
 
 ## 4. 验证默认协议已连接
 
-确认 MCP 工具清单包含 `nutrition_query`、`nutrition_execute`、`inventory_query` 和 `inventory_update`。
+确认 MCP 工具清单恰好出现 `nutrition_query` 与 `nutrition_execute`，不会默认出现 `get_agent_context`、`search_foods` 等底层工具。
 
 让 Agent 读取（不写入）：
 
@@ -210,7 +210,7 @@ nutrition_query({view:"summary",period:"today"})
 | --- | --- |
 | 看不到工具 | MCP 配置文件、客户端重启、`node` 和 `server.js` 绝对路径 |
 | 出现 `get_agent_context` 等几十个工具 | 意外启用了 `MCP_TOOL_SURFACE=full`；日常应为 `everyday` |
-| 看不到库存工具，或 `nutrition_query` 缺少 `summary` | 检查服务版本和 `MCP_TOOL_SURFACE`，日常使用 `everyday` |
+| 只有两个工具却不支持 `summary` | 正运行 v5.4 `compact` 接口或旧服务进程，先检查环境变量/版本 |
 | `spawn node ENOENT` | 使用 Node 可执行文件绝对路径 |
 | 工具存在但不被调用 | 宿主 MCP 工具权限，按需加载 Prompt 或提供 [当前契约](AGENT_CONTRACT_ZH.md) |
 | 无法识别照片 | 宿主需要具备视觉能力；MCP 不会自行查看图片 |

@@ -149,7 +149,7 @@ test('stdio DEFAULT exposes same 2 tools but much smaller enum choices and contr
  try{
   await client.connect(transport);
   const catalog=await client.listTools();
-  assert.deepEqual(catalog.tools.map(x=>x.name).sort(),['inventory_query','inventory_update','nutrition_execute','nutrition_query']);
+  assert.deepEqual(catalog.tools.map(x=>x.name).sort(),['nutrition_execute','nutrition_query']);
   const query=catalog.tools.find(x=>x.name==='nutrition_query');
   const write=catalog.tools.find(x=>x.name==='nutrition_execute');
   assert.deepEqual(query.inputSchema.properties.view.enum,EVERYDAY_READS);

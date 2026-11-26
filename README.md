@@ -2,7 +2,7 @@
 
 A local-first, Agent-first nutrition and everyday health ledger for private personal or trusted household NAS use. The host Agent understands the conversation; Nutrition Tracker validates, records, corrects and summarizes data. No embedded LLM, no automatic diagnosis, and no requirement to track every gram.
 
-**Default interface: 4 MCP tools — nutrition (3 read intents, 5 write intents) plus household inventory (1 read tool, 1 write tool).** The default `MCP_TOOL_SURFACE=everyday` is a *product contract*, not a generic access gateway to every underlying engine feature.
+**Default interface: 2 MCP tools, 3 read intents, 5 write intents.** The default `MCP_TOOL_SURFACE=everyday` is a *product contract*, not a generic access gateway to every underlying engine feature.
 
 ## Everyday Agent contract
 
@@ -18,23 +18,6 @@ A local-first, Agent-first nutrition and everyday health ledger for private pers
 | `nutrition_execute` | `photo_confirm` | Save a staged image estimate **only after explicit user approval** |
 
 These are three read and five write *intents*, not eight separately discoverable MCP tools.
-
-## Household food inventory (decision support, not a warehouse system)
-
-Two additional tools are exposed on **every** surface (including remote MCP):
-
-| Tool | Purpose |
-| --- | --- |
-| `inventory_query` | `current` / `item` / `expiring` / `availability` reads before menu or shopping advice |
-| `inventory_update` | One write entry: `purchase`, `consume`, `discard`, `adjust`, `update_condition` |
-
-Product rules (full contract in [Agent contract (中文)](docs/AGENT_CONTRACT_ZH.md)):
-
-- Quantities are **open-ended text** ("600g", "约4根", "一小把"). Receipt quantities and supplements remain on the purchase batch. With a comparable same-unit amount used, `consume` can estimate the remainder. When the batch is unspecified, it defaults to the oldest active batch and marks the allocation as inferred.
-- **Only user-reported events write stock.** Proposing a menu, accepting a menu, or "the cucumbers are too small" never deducts anything. `consume` happens after the user says cooking actually occurred; `discard` after the user reports waste.
-- **User statements override Agent inference** (`adjust`). Freshness prioritization uses the package date or estimates based on storage history and handling. `update_condition` accepts `storageChangedAt` when the actual storage change date is known.
-- Nutrition intake stays in the existing nutrition tools; inventory writes never touch the meal ledger.
-- Storage: one lightweight shared SQLite file (`inventory.db` next to the main DB, or inside `HOUSEHOLD_DATA_DIR`; override with `INVENTORY_DB_PATH`). Idempotent `requestId` receipts, purchase batches and a change journal; existing nutrition databases are untouched (no migration needed).
 
 The canonical parameter contract, examples, member rules and source/provenance boundaries are in **[Agent contract (中文)](docs/AGENT_CONTRACT_ZH.md)**. MCP hosts that support Prompts can request `nutrition_agent_workflow` only when needed; photo work can load the narrower `estimate_meal_photo` Prompt.
 
@@ -59,8 +42,8 @@ For platform-specific Agent configuration, see [installation / Agent setup](docs
 
 | Surface | Configuration | Intended users | Exposed operations |
 | --- | --- | --- | --- |
-| **everyday** (default) | `MCP_TOOL_SURFACE=everyday` | Ordinary recording and review | 4 tools: nutrition 3 read / 5 write intents + inventory query/update |
-| **compact** (migration / opt-in extended API) | `MCP_TOOL_SURFACE=compact` | Existing v5.4 Agents and explicitly advanced tasks | Same nutrition tool names (12 read views, 18 write operations) + inventory query/update |
+| **everyday** (default) | `MCP_TOOL_SURFACE=everyday` | Ordinary recording and review | 2 tools, 3 read and 5 write intents |
+| **compact** (migration / opt-in extended API) | `MCP_TOOL_SURFACE=compact` | Existing v5.4 Agents and explicitly advanced tasks | Same two tool names; 12 read views and 18 write operations |
 | **full** (legacy / engine administration) | `MCP_TOOL_SURFACE=full` | Older clients, specialist workflows and maintenance | Original low-level engine tool catalog |
 
 Do not select `compact` or `full` for ordinary dialogue just to expose more functionality. Switching a deployment's mode changes the tools discovered by **all clients of that MCP server instance**. For concurrent users with different needs, use deliberately separated MCP processes/configurations rather than silently switching everyone to a broad catalog.
