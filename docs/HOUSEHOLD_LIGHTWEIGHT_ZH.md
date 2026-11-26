@@ -19,7 +19,7 @@
    cp household.example.json household.json
    ```
 
-   修改成员 `id`、`name`、`mode`（`general` 普通观察，`performance` 健身营养）与时区。固定 ID，避免既有数据库归属变化。不要把家庭名单提交到代码仓库。
+   修改成员 `id`、`name`、`mode`（`general` 普通观察，`performance` 健身营养）与时区。固定 ID，避免既有数据库归属变化。`assistantName` 是家里对助手的称呼（1–20 字，默认「助手」），面板上的「跟…说」和顶栏聊天入口都用它；称呼属于家庭名单，不写进代码。不要把家庭名单提交到代码仓库。
 3. 使用已有远程 MCP `.env` 中的 `MCP_HTTP_TOKEN`（至少 32 字节）。确保配置反向代理/Tailscale，只允许家庭网络访问。**不需要成员级凭证。**
 4. 运行：
 

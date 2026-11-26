@@ -19,6 +19,17 @@ test('small household config has no user tokens, passwords or sharing grants',()
  assert.throws(()=>validateHouseholdConfig({members:[{id:'one',name:'A'},{id:'one',name:'B'}]}),/duplicate/);
  assert.throws(()=>validateHouseholdConfig({members:[{id:'..',name:'bad'}]}),/invalid/);
 });
+test('the name the family calls its assistant is a household note, not code',()=>{
+ const f=fixture();try{assert.equal(f.household.context().assistantName,'助手');}finally{f.close();}
+ const dir=mkdtempSync(path.join(tmpdir(),'household-test-'));const configPath=path.join(dir,'household.json');
+ try{
+  writeFileSync(configPath,JSON.stringify({assistantName:' 小管家 ',members:[{id:'jo',name:'Jo'}]}));
+  const h=createHousehold({configPath,dir,engineFactory:createEngine,now:()=>NOW});
+  try{assert.equal(h.context().assistantName,'小管家');}finally{h.close();}
+  writeFileSync(configPath,JSON.stringify({assistantName:'',members:[{id:'jo',name:'Jo'}]}));
+  assert.throws(()=>createHousehold({configPath,dir,engineFactory:createEngine,now:()=>NOW}),/assistantName/);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
 test('one household context contains performance nutrition and general wellness without forcing carbs',()=>{
  const f=fixture();try{
   const c=f.household.context();assert.equal(c.scope,'household_nas');assert.equal(c.members.length,2);

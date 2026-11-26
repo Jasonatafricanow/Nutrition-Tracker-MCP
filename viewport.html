@@ -872,6 +872,14 @@
     // ---------- 厨房：冰箱（可改）、菜单、菜谱、症状和服药时间线 ----------
     // Writes go through the same everyday operations an agent uses, as client 「页面」 (kitchen scope only).
     let stockBusy=false; // a form or prompt is open: the 30-second refresh must not wipe it
+    // What this family calls its assistant: household.json "assistantName" (default 助手), never written into the page.
+    let assistantName='助手';
+    function setAssistantName(name){
+      if(typeof name!=='string'||!name.trim())return;
+      assistantName=name.trim();
+      const link=document.querySelector('.pb-hub a[data-k="chat"]');
+      if(link)link.textContent=assistantName;
+    }
     const rid=p=>p+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,8);
     async function kitchenOp(op,args){
       const body=await dispatch(null,{...args,requestId:args.requestId??rid('page-'+op)},undefined,op);
@@ -935,10 +943,10 @@
       return `<div class="sub"><b>${head}</b> ${cook}${m.dishes.map(d=>dishLine(m,d)).join('')}${shop}${steps}</div>`;
     }
     function menusCard(menus){
-      return card('菜单',menus.length?menus.map(menuBlock).join(''):'<span class="muted">还没有菜单；跟助手说「今晚吃什么」</span>');
+      return card('菜单',menus.length?menus.map(menuBlock).join(''):'<span class="muted">还没有菜单；跟'+esc(assistantName)+'说「今晚吃什么」</span>');
     }
     async function cookedMenu(menuId){
-      stockBusy=true; const ok=confirm('这桌菜都做了？冰箱会按菜里写的用量扣掉。只做了其中几道就跟助手说是哪几道。'); stockBusy=false;
+      stockBusy=true; const ok=confirm('这桌菜都做了？冰箱会按菜里写的用量扣掉。只做了其中几道就跟'+assistantName+'说是哪几道。'); stockBusy=false;
       if(!ok)return;
       const r=await kitchenOp('menu',{action:'cooked',menuId});
       if(r?.ok){
@@ -959,7 +967,7 @@
         ${['heat','seasoning','doneness'].filter(k=>r[k]).map(k=>`<div class="muted">${({heat:'火候',seasoning:'调味',doneness:'熟度'})[k]}：${esc(r[k])}</div>`).join('')}
         ${(r.steps||[]).length?`<ol>${r.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>`:''}
         <button type="button" class="linkbtn" onclick="dropRecipe('${esc(r.recipeId)}','${esc(r.name)}')">从菜谱删掉</button></details>`);
-      return card('菜谱',rows.join('')||'<span class="muted">还没有；菜单里认可的菜点「存为菜谱」，或跟助手说「这个存下来」</span>');
+      return card('菜谱',rows.join('')||'<span class="muted">还没有；菜单里认可的菜点「存为菜谱」，或跟'+esc(assistantName)+'说「这个存下来」</span>');
     }
     async function dropRecipe(id,name){
       stockBusy=true; const ok=confirm(`把「${name}」从菜谱删掉？`); stockBusy=false;
@@ -1013,6 +1021,7 @@
         if (res.status===404) return; // Single-person mode stays unchanged
         if (!res.ok) return;
         const data=await res.json();
+        setAssistantName(data.assistantName);
         $('household-panel').classList.remove('hidden');
         $('household-cards').innerHTML=data.members.map(m=>{
           if(m.mode==='general')return familyCard(m);

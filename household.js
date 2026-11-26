@@ -45,6 +45,8 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
   const members=validateHouseholdConfig(config);
   const byId=new Map(members.map(m=>[m.id,m]));
   const primary=config.primary??null;
+  // What this family calls its assistant (shown on the dashboard: "跟{assistantName}说"). A household note, not code.
+  const assistantName=config.assistantName==null?'助手':typeof config.assistantName==='string'&&config.assistantName.trim()&&config.assistantName.trim().length<=20?config.assistantName.trim():(()=>{throw Error('household assistantName must be 1..20 characters');})();
   if(primary!==null&&!byId.has(primary))throw Error('household primary must be a listed member');
   if(primary!==null&&!primaryEngine)throw Error('household primary requires the main engine');
   mkdirSync(dir,{recursive:true,mode:0o700});
@@ -132,7 +134,7 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
   function context({days=14,memberId}={}){
     if(memberId)member(memberId);
     if(!Number.isInteger(days)||days<3||days>30)throw Error('days must be 3..30');
-    return {ok:true,scope:'household_nas',members:members.filter(m=>!memberId||m.id===memberId).map(m=>{
+    return {ok:true,scope:'household_nas',assistantName,members:members.filter(m=>!memberId||m.id===memberId).map(m=>{
       const snapshot=memberEngine(m.id).buildSnapshot();
       const rows=snapshot.history.filter(x=>x.date>=shiftDay(snapshot.date,-days+1)).toSorted((a,b)=>a.date.localeCompare(b.date));
       const today=snapshot.today;const obs=observations(m.id,days);
@@ -187,6 +189,6 @@ export function createHousehold({configPath,dir,engineFactory,primaryEngine=null
     database.prepare('INSERT INTO mentions VALUES(?,?,?) ON CONFLICT(member_id,signal) DO UPDATE SET last_date=excluded.last_date').run(memberId,signal,day);
     return {ok:true,memberId,signal,lastMentioned:day};
   };
-  return {members,primary,member,memberTool,logObservation,observations,context,acknowledge,stock,kitchen,timeline,shareLabelFoods,
+  return {members,primary,assistantName,member,memberTool,logObservation,observations,context,acknowledge,stock,kitchen,timeline,shareLabelFoods,
     close(){for(const [id,e] of engines)if(id!==primary)e.close();database.close();}};
 }
